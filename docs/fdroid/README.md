@@ -12,8 +12,13 @@ updated by, one from the GitHub Releases page.
 `metadata/` in a fork of [fdroiddata](https://gitlab.com/fdroid/fdroiddata). The application ID is
 `com.ionfyre.talaria`, under a domain the project owns, which is what their policy advises.
 
-Store listing text, screenshots and the per-version changelog live in `fastlane/metadata/android/en-US/`,
-so the recipe needs no `Description` field.
+Store listing text, screenshots, the listing icon and the per-version changelog live in
+`fastlane/metadata/android/en-US/`, so the recipe needs no `Description` field. Their quick start
+guide's upstream-metadata checklist is satisfied: a public repo with a FOSS licence, tags on release
+commits (`v1.2.2` for versionName 1.2.2), a short description under 80 characters with no trailing
+dot, a full description, screenshots, an icon, and changelog files under 500 characters per version
+code. The icon is derived from `branding/talaria_launcher_source.png`, which is tracked, so the
+artwork's origin is inspectable.
 
 **How the Flutter version is pinned.** The recipe clones the `flutter` srclib at its `stable` branch
 and a `prebuild` step checks out the exact SDK version declared in `pubspec.yaml`. That is the
