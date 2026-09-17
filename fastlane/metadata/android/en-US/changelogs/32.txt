@@ -1,0 +1,1 @@
+* You can scroll up and read while a reply is still streaming. The view holds your place and the response grows in below, instead of jumping back to the newest message on every streamed character. Following resumes when you return to the bottom.

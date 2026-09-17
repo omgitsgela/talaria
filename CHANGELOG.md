@@ -3,6 +3,18 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.2.3
+
+### build 32
+- **You can read while a reply streams.** Scrolling up during a streaming reply now holds your
+  position with the response continuing to grow below, instead of the view being dragged back to the
+  newest message on every streamed character. Following resumes when you return to the bottom.
+- The cause was that the follow path jumped to the newest end without checking whether a gesture was
+  in flight. A streamed reply delivers a change every few milliseconds, so each jump cancelled the
+  drag before it could move the view far enough to stop following: the offset could never escape the
+  near-bottom band. A live gesture now wins, and a content-size change can no longer re-arm the
+  follow mid-drag either.
+
 ## 1.2.2
 
 ### build 31

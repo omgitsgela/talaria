@@ -142,8 +142,18 @@ class _HomeScreenState extends State<HomeScreen> {
     // The transcript is a REVERSED list: offset 0 is the newest (bottom) and
     // offset max is the oldest (top). "At the bottom" (newest) is therefore a
     // small offset, not a large one.
+    //
+    // A finger on the list disarms the follow OUTRIGHT, even while the offset is
+    // still inside the near-bottom band. The band alone is not enough to disarm
+    // it during a streamed reply: a store change lands every few milliseconds,
+    // each one jumping back to the newest end, so the drag is reset before it
+    // can ever accumulate past 48px and the reader can never get away from the
+    // bottom. While the gesture lasts, the user is driving; settling back inside
+    // the band (the events after the finger lifts) re-arms the follow.
+    final dragging =
+        _scroll.position.userScrollDirection != ScrollDirection.idle;
     final atBottom = _scroll.position.pixels <= 48;
-    _stickToBottom = atBottom;
+    _stickToBottom = dragging ? false : atBottom;
     // Streaming-compensation (read-hold) arming: capture the extent ONCE, the
     // moment the user moves up from the newest end. From then on only the
     // content-change path updates the reference — re-reading it on every
@@ -244,8 +254,18 @@ class _HomeScreenState extends State<HomeScreen> {
   void _scheduleScrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_scroll.hasClients) return;
-      if (_scroll.position.pixels != 0) {
-        _scroll.jumpTo(0);
+      final pos = _scroll.position;
+      // A live gesture wins. Jumping to the newest end mid-drag cancels the
+      // drag, which is how "scroll up while it streams" was impossible: every
+      // streamed character reset the offset to 0 and re-armed the follow.
+      if (pos.userScrollDirection != ScrollDirection.idle) {
+        _stickToBottom = false;
+        _pinnedMaxExtent ??= pos.maxScrollExtent;
+        _updateArrow();
+        return;
+      }
+      if (pos.pixels != 0) {
+        pos.jumpTo(0);
       }
       _stickToBottom = true;
       _pinnedMaxExtent = null;
@@ -315,7 +335,10 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted || !_scroll.hasClients) return;
       final pos = _scroll.position;
       final atBottom = pos.pixels <= 48;
-      _stickToBottom = atBottom;
+      // Same rule as _onScroll: the reply growing fires this constantly, so a
+      // live gesture must not be overruled into "follow" by a metrics resync.
+      _stickToBottom =
+          pos.userScrollDirection != ScrollDirection.idle ? false : atBottom;
       // While streaming the read-hold owns the extent reference; outside it,
       // re-arm to where the user actually is, or a later delta would be
       // compensated by a stale amount.
