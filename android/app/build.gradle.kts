@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -31,11 +33,35 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        // Release signing identity, read from android/key.properties (git-ignored).
+        // The keystore itself lives OUTSIDE the repository: losing it means the app
+        // can never be updated again, and a leaked one means someone else can sign
+        // updates that Android would accept.
+        if (rootProject.file("key.properties").exists()) {
+            create("release") {
+                val props = Properties()
+                rootProject.file("key.properties").inputStream().use { props.load(it) }
+                storeFile = file(props["storeFile"] as String)
+                storePassword = props["storePassword"] as String
+                keyAlias = props["keyAlias"] as String
+                keyPassword = props["keyPassword"] as String
+                // v3 carries the proof-of-rotation lineage, so a deliberate key rotation
+                // stays possible on Android 9+ without forcing every user to reinstall.
+                enableV3Signing = true
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // Falls back to the Android debug key when key.properties is absent, which
+            // keeps a fresh clone of the repository buildable without the private key.
+            signingConfig = if (rootProject.file("key.properties").exists()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
     }
 }

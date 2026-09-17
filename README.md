@@ -82,9 +82,13 @@ Notes:
 
 - The APK is a **universal release build** (arm64-v8a, armeabi-v7a and x86_64), so it runs on
   any supported phone and on emulators.
-- It is signed with the standard **Android debug key**, which is the Flutter default until a
-  real keystore is configured. It installs and runs normally, but it cannot replace an install
-  signed with a different key, and it is not a production signing key.
+- It is signed with the project's own **release key** (RSA 4096). The keystore is deliberately
+  kept outside this repository and is never committed, so a clone cannot build a release APK that
+  Android will accept as an update to a published one. Without `android/key.properties`, release
+  builds fall back to the debug key, which is fine for local work and not for distribution.
+- Android ties updates to the signing key, so an APK installed from this page can only be updated
+  by another APK from this page. An F-Droid build is signed by F-Droid with its own key, so pick
+  one source per device.
 - Requires **Android 7.0 (API 24) or newer**.
 - Your phone must be able to reach the gateway. A gateway on your own network means the same
   Wi-Fi network.
