@@ -3,6 +3,22 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.2.1
+
+### build 30
+- The connection screen offers **Sign in with Hermes** as soon as it knows the gateway, instead of
+  only appearing after you press Test connection.
+- That screen now also keeps the **bearer token field available alongside the sign-in button**, so a
+  token minted elsewhere is still a way in. Previously the field vanished for exactly the gateways
+  that support signing in, leaving no way to paste one.
+- The connection screen shows the app's own logo in place of a generic aeroplane icon.
+- Its tagline now comes from the same constant the splash uses, so the two screens can no longer
+  disagree about the app's one-liner.
+- Field explanations wrap properly. Flutter ellipsizes a helper after one line unless a line limit
+  is set, which was hiding most of the token explanations on a phone.
+- The README explains, in plain terms, the three ways to reach a gateway: the same Wi-Fi, a private
+  network between your devices, or a hosted gateway shared with you.
+
 ## 1.2.0
 
 ### build 29

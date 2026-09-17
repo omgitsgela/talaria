@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../app_version.dart';
 import '../gateway/config.dart';
 import '../gateway/http_service.dart';
 import '../gateway/native_oauth.dart';
@@ -12,6 +15,11 @@ class ConnectionScreen extends StatefulWidget {
   const ConnectionScreen({super.key, required this.model, this.onConnected});
   final AppModel model;
   final VoidCallback? onConnected;
+
+  /// Test seam: the HTTP prober, so widget tests can drive auth-flow discovery
+  /// without a live gateway.
+  @visibleForTesting
+  static GatewayHttp Function(GatewayConfig config)? httpFactoryForTest;
 
   @override
   State<ConnectionScreen> createState() => _ConnectionScreenState();
@@ -36,6 +44,10 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
 
   static const _defaultUrl = 'http://gw.example.internal:9119';
 
+  /// Debounce for the quiet auth-flow discovery that runs while the user types
+  /// a URL, so a gateway's sign-in option is known before anything is pressed.
+  Timer? _flowDebounce;
+
   @override
   void initState() {
     super.initState();
@@ -46,10 +58,16 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
     _headerName = TextEditingController();
     _headerValue = TextEditingController();
     if (c?.usesOAuth ?? false) _authToken = false;
+    _url.addListener(_onUrlChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_discoverFlows());
+    });
   }
 
   @override
   void dispose() {
+    _flowDebounce?.cancel();
+    _url.removeListener(_onUrlChanged);
     _url.dispose();
     _token.dispose();
     _bearer.dispose();
@@ -64,6 +82,47 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
         oauthToken: _authToken ? '' : _bearer.text.trim(),
       );
 
+  GatewayHttp _http(GatewayConfig c) =>
+      (ConnectionScreen.httpFactoryForTest ?? GatewayHttp.new)(c);
+
+  void _onUrlChanged() {
+    _flowDebounce?.cancel();
+    _flowDebounce = Timer(const Duration(milliseconds: 800), () {
+      unawaited(_discoverFlows());
+    });
+  }
+
+  /// Ask the gateway which auth flows it advertises, quietly.
+  ///
+  /// This is what makes "Sign in with Hermes" available from the moment the
+  /// screen knows the gateway, instead of only after pressing Test connection.
+  /// Deliberately silent on failure: a background probe must never paint an
+  /// error the user did not ask for, and it only ever switches the sign-in
+  /// affordance ON.
+  Future<void> _discoverFlows() async {
+    final url = _url.text.trim();
+    // The shipped placeholder host is not a real gateway; probing it would be
+    // a guaranteed wasted request.
+    if (url.isEmpty || url == _defaultUrl) return;
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+    final http = _http(_build());
+    try {
+      final flows = await http.authFlows();
+      if (!mounted) return;
+      if (!NativeOAuthService.flowsSupportNativeFlow(flows)) return;
+      setState(() {
+        _nativeAvailable = true;
+        // Only move the user to the OAuth tab if they have not already started
+        // entering a session token.
+        if (_token.text.trim().isEmpty) _authToken = false;
+      });
+    } catch (_) {
+      // No answer (offline, not a gateway, older build): leave the form alone.
+    } finally {
+      http.close();
+    }
+  }
+
   Future<void> _probe() async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
     setState(() {
@@ -72,7 +131,7 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
       _nativeAvailable = false;
       _oauthError = '';
     });
-    final http = GatewayHttp(_build());
+    final http = _http(_build());
     try {
       final result = await http.testConnection();
       // Detect whether this gateway advertises the RFC 8252 native flow so
@@ -158,8 +217,9 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                             ?.copyWith(fontWeight: FontWeight.w500,
                                 color: theme.colorScheme.onSurface)),
                     const SizedBox(height: 8),
-                    Text(
-                        'Chat, live tool activity, sessions, and models — driven over the gateway WebSocket API.',
+                    // Shared with the splash: one constant, so the two screens
+                    // cannot disagree about the app's own one-liner.
+                    Text(kAppTagline,
                         textAlign: TextAlign.center,
                         style: theme.textTheme.bodySmall
                             ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
@@ -213,51 +273,61 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                         decoration: const InputDecoration(
                             labelText: 'Session token',
                             helperText:
-                                'The dashboard X-Hermes-Session-Token (loopback / --insecure gateways).'),
+                                'The dashboard X-Hermes-Session-Token (loopback / --insecure gateways).',
+                            // Without an explicit cap, Flutter draws a helper on
+                            // ONE line and ellipsizes the rest, which hid most
+                            // of this explanation on a phone.
+                            helperMaxLines: 3),
                         obscureText: true,
                       )
-                    else if (_nativeAvailable)
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          FilledButton.tonalIcon(
-                            onPressed:
-                                _oauthLoading || _connecting ? null : _signInOAuth,
-                            icon: _oauthLoading
-                                ? const SizedBox(
-                                    width: 18,
-                                    height: 18,
-                                    child: CircularProgressIndicator(strokeWidth: 2))
-                                : const Icon(Icons.login),
-                            label: Text(_oauthLoading
-                                ? _oauthStatus.isEmpty
-                                    ? 'Signing in…'
-                                    : _oauthStatus
-                                : 'Sign in with Hermes'),
+                    else ...[
+                      // Signing in is the primary path when the gateway offers
+                      // it, but the field below stays: a bearer token minted
+                      // elsewhere is a legitimate way in, and hiding the field
+                      // for exactly those gateways left no way to use one.
+                      if (_nativeAvailable) ...[
+                        FilledButton.tonalIcon(
+                          onPressed:
+                              _oauthLoading || _connecting ? null : _signInOAuth,
+                          icon: _oauthLoading
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2))
+                              : const Icon(Icons.login),
+                          label: Text(_oauthLoading
+                              ? _oauthStatus.isEmpty
+                                  ? 'Signing in…'
+                                  : _oauthStatus
+                              : 'Sign in with Hermes'),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Opens the system browser. Talaria catches the loopback callback and stores the token securely on this device.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant),
+                        ),
+                        if (_oauthError.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 8),
+                            child: Text(_oauthError,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.error)),
                           ),
-                          const SizedBox(height: 6),
-                          Text(
-                            'Opens the system browser. Talaria catches the loopback callback and stores the token securely on this device.',
-                            style: theme.textTheme.bodySmall
-                                ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-                          if (_oauthError.isNotEmpty)
-                            Padding(
-                              padding: const EdgeInsets.only(top: 8),
-                              child: Text(_oauthError,
-                                  style: theme.textTheme.bodySmall
-                                      ?.copyWith(color: theme.colorScheme.error)),
-                            ),
-                        ],
-                      )
-                    else
+                        const SizedBox(height: 14),
+                      ],
                       TextFormField(
                         controller: _bearer,
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                             labelText: 'Bearer token',
-                            helperText:
-                                'OAuth bearer token (gated / public gateways). Minted by the native sign-in flow.'),
+                            helperText: _nativeAvailable
+                                ? 'Or paste an OAuth bearer token you already have instead of signing in.'
+                                : 'OAuth bearer token (gated / public gateways). Paste one you already have, or test the connection to see whether this gateway can sign you in.',
+                            helperMaxLines: 4),
                         obscureText: true,
                       ),
+                    ],
                         ],
                       ),
                     ),
@@ -353,8 +423,10 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
           width: 2,
         ),
       ),
-      child: Icon(Icons.flight_takeoff,
-          size: 48, color: cs.primary),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Image.asset('assets/logo.png', fit: BoxFit.contain),
+      ),
     );
   }
 }

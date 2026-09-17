@@ -1,6 +1,6 @@
 Talaria is a mobile client for a self-hosted Hermes Agent gateway running in remote gateway mode. It puts the conversations, goals and tasks you already have on your desktop onto your phone.
 
-A gateway is required. Talaria has no server of its own and no account: you point it at a Hermes gateway you control, on your own network or wherever you run it, and it connects over that gateway's own protocol.
+A gateway is required. Talaria has no server of its own and no account. You reach your gateway over a network you already have: the same Wi-Fi, a private VPN or mesh network such as WireGuard, Tailscale or ZeroTier, or a hosted gateway that somebody shares with you. The app opens the address you give it and speaks the gateway's normal protocol, nothing more.
 
 Features:
 * Replies stream in live, with thinking traces, tool activity and response text in the order the agent produced them.

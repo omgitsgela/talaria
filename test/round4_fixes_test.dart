@@ -315,7 +315,10 @@ void main() {
     // 'Talaria' also appears in the ConnectionScreen underneath — so we count
     // both, which also proves the splash overlays the REAL app.
     expect(find.text('Talaria'), findsNWidgets(2));
-    expect(find.text(kAppTagline), findsOneWidget);
+    // The connection screen now uses the same tagline constant, so this text
+    // appears twice for the same reason 'Talaria' does: the splash sits over
+    // the real app. If they ever drift apart again, this count drops to one.
+    expect(find.text(kAppTagline), findsNWidgets(2));
     expect(find.text(kAppVersionLabel), findsOneWidget);
     expect(find.text('The Winged Sandals of Hermes - Swift Passage, Wherever You Are.'),
         findsOneWidget);

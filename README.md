@@ -47,6 +47,33 @@ This is an unofficial companion. It is not affiliated with or endorsed by Nous R
   in if it is enabled.
 - An Android phone running **Android 7.0 or newer**.
 
+## Reaching your gateway
+
+Talaria talks to your gateway over a network you already have. There is no relay, no account, and
+nothing of ours in the middle, so the only question is how your phone gets to that address. In
+practice there are three arrangements, and all of them work.
+
+**Same Wi-Fi network.** The simplest one. If the gateway runs on a computer at home and your phone
+is on the same Wi-Fi, enter that computer's address, something like `http://192.168.1.50:9119`, and
+connect. Nothing else to set up. The limit is that it only works while you are at home, and opening
+your gateway to the internet just to get around that is a bad trade.
+
+**A private network between your devices.** Install a VPN or mesh network on both the gateway
+machine and your phone, then use the address it gives the gateway. WireGuard, Tailscale and ZeroTier
+all do this job. Your phone can then reach the gateway from anywhere, and you never open a port to
+the public internet. This is what most people settle on, because it keeps the gateway private while
+making it reachable from a coffee shop.
+
+**A gateway someone hosts and shares with you.** If a person or a team runs a Hermes gateway on a
+server and gives you access, point the app at their address and authenticate the way they tell you,
+usually by signing in or with a token they issue for you. If that gateway is reachable from the
+public internet, use an `https://` address, because your token travels with every request.
+
+Whichever you choose, the app is doing nothing clever: it opens the address you gave it and speaks
+the gateway's normal protocol. If the gateway's address loads in your phone's browser, the app can
+reach it too. If it does not, the problem is the network, not the app, and the three arrangements
+above are the ways to fix it.
+
 ## Install on Android
 
 Talaria is not on Google Play. Install the APK from the
@@ -231,9 +258,11 @@ your device and you decide where it goes: the app itself never sends anything an
 
 ## Troubleshooting
 
-**It will not connect.** Check the address and port, confirm the phone is on the same network as the
-gateway, and confirm the gateway is running in remote gateway mode. If your gateway requires OAuth,
-use the sign in option rather than pasting a token.
+**It will not connect.** Check the address and port, confirm the gateway is running in remote
+gateway mode, and check that you can open that address in your phone's browser. If you are away from
+home, the gateway has to be reachable somehow: see [Reaching your gateway](#reaching-your-gateway)
+for the private-network and hosted options. If your gateway requires OAuth, use the sign in option
+rather than pasting a token.
 
 **The token is rejected.** Session tokens and bearer tokens are different things and are not
 interchangeable. Make sure you copied the value your gateway expects for the field you are using.
