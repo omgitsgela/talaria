@@ -56,7 +56,7 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keeps the Hermes gateway WebSocket connection alive in the background so task execution continues and replies are delivered."/>
             <intent-filter>
-                <action android:name="com.talaria.talaria.FOREGROUND_SERVICE"/>
+                <action android:name="com.ionfyre.talaria.FOREGROUND_SERVICE"/>
             </intent-filter>
         </service>
 

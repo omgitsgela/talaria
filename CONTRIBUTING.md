@@ -6,7 +6,10 @@ want to use the app, the [README](README.md) is the place to start.
 ## Setting up
 
 - **Flutter 3.22 or newer** (developed and released with 3.47.2) with Dart 3.4+.
-- **A working Android toolchain**: the Android SDK, and **JDK 21**.
+- **A working Android toolchain**: the Android SDK, and **JDK 21 from an open implementation**
+  (OpenJDK, for example Eclipse Temurin 21, which is what this project builds with). Do not build
+  with Oracle's JDK: F-Droid requires a fully free toolchain and rejects proprietary build tools
+  explicitly by name, and the submitted build metadata assumes an open JDK.
 - The Android build uses `compileSdk 37` and relies on the version pinned in
   `android/settings.gradle.kts`. Flutter's Gradle plugin hard-fails below AGP 8.11.1, so if you
   bump Flutter and the build complains about plugin versions, update both versions there rather

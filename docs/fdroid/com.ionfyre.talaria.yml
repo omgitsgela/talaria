@@ -1,21 +1,29 @@
 # F-Droid build metadata for Talaria.
 #
 # This is the file submitted to https://gitlab.com/fdroid/fdroiddata as
-# `metadata/com.talaria.talaria.yml`. F-Droid builds every app from source in a
-# clean environment and signs the result with its own key, so the debug signing
-# key used for the APKs on this repository's Releases page is irrelevant here.
+# `metadata/com.ionfyre.talaria.yml`. The application ID is com.ionfyre.talaria,
+# under a domain the project owns.
+#
+# F-Droid builds every app from source in a clean environment and signs the
+# result with its own key, so the release key used for the GitHub releases is
+# irrelevant here.
 #
 # Field reference: https://f-droid.org/docs/Build_Metadata_Reference/
 # The build steps follow the pattern used by other Flutter apps in fdroiddata
 # (see `metadata/app.alextran.immich.yml`), which clone the Flutter SDK through
-# a srclib and drive `flutter build apk --release` directly.
+# a srclib and drive `flutter build apk --release` directly. The policy
+# explicitly permits the Android SDK, Flutter SDK and Hermes to use their
+# official prebuilt binaries until Debian packaging exists.
 #
-# Keep versionName/versionCode/commit in step with the tag that is being built:
-# they must match the APK's own versionName/versionCode exactly.
+# Store listing text, screenshots and the per-version changelog come from
+# `fastlane/metadata/android/en-US/` in this repository, so no `Description`
+# field is needed here.
+#
+# Keep versionName / versionCode / commit in step with the tag being built: they
+# must match the APK's own values exactly.
 
 Categories:
   - Internet
-  - Development
 
 License: MIT
 AuthorName: omgitsgela
@@ -30,9 +38,9 @@ RepoType: git
 Repo: https://github.com/omgitsgela/talaria
 
 Builds:
-  - versionName: 1.1.1
-    versionCode: 26
-    commit: v1.1.1
+  - versionName: 1.2.0
+    versionCode: 29
+    commit: v1.2.0
     output: build/app/outputs/flutter-apk/app-release.apk
     srclibs:
       - flutter@3.47.2
@@ -47,5 +55,5 @@ Builds:
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
-CurrentVersion: 1.1.1
-CurrentVersionCode: 26
+CurrentVersion: 1.2.0
+CurrentVersionCode: 29

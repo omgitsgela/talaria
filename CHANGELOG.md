@@ -3,6 +3,22 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.2.0
+
+### build 29
+- The application ID is now `com.ionfyre.talaria`, under a domain the project owns, which is what
+  F-Droid asks for. This installs as a **new app**: uninstall any earlier build first, and the
+  saved gateway settings will not carry over.
+- Markdown rendering moved from the discontinued `flutter_markdown` to `flutter_markdown_plus`.
+- Prepared for F-Droid: listing text, screenshots and a per-version changelog under `fastlane/`, a
+  submission recipe at `docs/fdroid/com.ionfyre.talaria.yml`, and a documented read against their
+  inclusion policy.
+- The README's privacy section now states plainly what the app does not do: no tracking, no
+  analytics, no advertising, no crash reporting, no backend of ours, and nothing leaves the device
+  unless you send it.
+- Build documentation names OpenJDK (Temurin) explicitly, since F-Droid rejects proprietary build
+  tools including Oracle's JDK.
+
 ## 1.1.3
 
 ### build 28

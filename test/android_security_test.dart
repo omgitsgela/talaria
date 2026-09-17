@@ -8,8 +8,13 @@ void main() {
     expect(main, contains('FlutterSecureStorage'));
   });
   test('Android foreground service does not restart a dead Dart turn', () {
-    final native = File(
-            'android/app/src/main/kotlin/com/talaria/talaria/TalariaForegroundService.kt')
+    // Found by name, not by package path: the application ID is allowed to
+    // change (it moved to com.ionfyre.talaria for F-Droid), and this test is
+    // about the service contract, not about where the file lives.
+    final native = Directory('android/app/src/main/kotlin')
+        .listSync(recursive: true)
+        .whereType<File>()
+        .firstWhere((f) => f.path.endsWith('TalariaForegroundService.kt'))
         .readAsStringSync();
     // START_NOT_STICKY: the OS must not resurrect this service (it cannot
     // recreate the Dart socket/turn anyway).

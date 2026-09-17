@@ -1,0 +1,5 @@
+First build prepared for F-Droid distribution.
+* Search your conversations from the conversation list.
+* Bug reports from Settings, Diagnostics, with the same report offered on screen when an error happens.
+* Fixed the app getting stuck on the loading screen after a force close.
+* New application ID (com.ionfyre.talaria) under a domain the project owns, so this installs as a new app alongside any earlier build.

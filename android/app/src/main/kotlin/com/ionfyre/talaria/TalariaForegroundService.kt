@@ -1,4 +1,4 @@
-package com.talaria.talaria
+package com.ionfyre.talaria
 
 import android.app.Notification
 import android.app.NotificationChannel

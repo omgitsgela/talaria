@@ -7,7 +7,7 @@ plugins {
 }
 
 android {
-    namespace = "com.talaria.talaria"
+    namespace = "com.ionfyre.talaria"
     // file_picker 12 -> flutter_secure_storage 11 requires compileSdk 37.
     compileSdk = 37
     ndkVersion = flutter.ndkVersion
@@ -20,7 +20,7 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.talaria.talaria"
+        applicationId = "com.ionfyre.talaria"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion

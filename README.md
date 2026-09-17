@@ -264,12 +264,23 @@ Not on F-Droid yet. The submission is prepared and the recipe is in
 
 ## Privacy and security
 
-- Talaria talks **only** to the gateway you configure. There is no telemetry, no analytics, and no
-  third party service involved.
-- Your gateway URL and token are stored in Android's Keystore backed secure storage on the device.
-- Plain HTTP is allowed so the app can reach a gateway on your own network. If your gateway is
-  reachable from outside your LAN, put it behind TLS and use an `https://` address.
-- Conversations are read from your gateway and displayed. The app does not copy them anywhere else.
+What the app does and does not do with your data:
+
+- **No tracking and no analytics.** There is no analytics SDK, no crash reporter, no advertising
+  library, and no third party service in the build. How you use the app is not measured, because
+  there is nowhere for that measurement to go.
+- **No account, and no server of ours.** Talaria has no backend. The only network endpoint it ever
+  contacts is the gateway you configure.
+- **Nothing leaves your device unless you send it.** Conversations are read from your gateway and
+  drawn on screen. The bug report is assembled on the device and only goes wherever you paste it.
+- **Not tied to a single service.** Any Hermes gateway works, including one you host yourself, so
+  the app cannot be stranded by somebody else's decision to shut a service down. Change the URL and
+  it points somewhere else.
+- **Your token is kept in Android's Keystore backed secure storage**, not in plain preferences.
+- **Verifiable releases.** The source is public, each release is built from a tagged commit, and
+  every APK is signed with the project's own key, so you can check what you installed.
+- **Plain HTTP is allowed** so a gateway on your own network works without certificates. If your
+  gateway is reachable from outside your network, put it behind TLS and use an `https://` address.
 
 ## Contributing
 
@@ -280,6 +291,9 @@ issue tracker.
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+The artwork, meaning the app logo and the launcher icons derived from it, was generated for this
+project and is released under the same MIT licence, so the entire package is freely redistributable.
 
 ## Acknowledgements
 

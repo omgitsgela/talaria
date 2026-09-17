@@ -1,0 +1,21 @@
+Talaria is a mobile client for a self-hosted Hermes Agent gateway running in remote gateway mode. It puts the conversations, goals and tasks you already have on your desktop onto your phone.
+
+A gateway is required. Talaria has no server of its own and no account: you point it at a Hermes gateway you control, on your own network or wherever you run it, and it connects over that gateway's own protocol.
+
+Features:
+* Replies stream in live, with thinking traces, tool activity and response text in the order the agent produced them.
+* Answer Hermes from your phone. Question and approval prompts arrive as cards you can fill in or approve.
+* Conversation list with pinning, time buckets, and a search box that filters on titles and previews.
+* Model, reasoning level and speed per conversation, chosen from your gateway's own model list.
+* A context readout showing how much of the model's window the conversation is using.
+* Goals mirrored from the gateway, and slash commands typed straight into the composer.
+* Attachments, notifications for finished replies and for prompts that need you, and Markdown replies with selectable text.
+
+Privacy:
+* No tracking, no analytics, no advertising, no crash reporting. Nothing about how you use the app is collected.
+* No account and no backend of ours: the only network endpoint it contacts is the gateway you configure.
+* Not tied to a single service: any Hermes gateway works, including one you host yourself.
+* Bug reports are assembled on your device and only go wherever you paste them.
+* Your gateway token is kept in Android's Keystore backed secure storage.
+
+Talaria is an unofficial companion. It is not affiliated with or endorsed by Nous Research.

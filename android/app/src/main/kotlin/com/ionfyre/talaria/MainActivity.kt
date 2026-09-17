@@ -1,4 +1,4 @@
-package com.talaria.talaria
+package com.ionfyre.talaria
 
 import android.content.Intent
 import android.os.Build
