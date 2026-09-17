@@ -70,7 +70,7 @@ org.gradle.java.home=/path/to/jdk-21
 Talaria is not on Google Play. Install the APK from the
 [Releases](https://github.com/omgitsgela/talaria/releases) page:
 
-1. On the phone, open the release and download the `.apk` asset.
+1. On the phone, open the release and download `talaria-<version>.apk`.
 2. Tap the downloaded file. Android blocks installs from unknown sources by default, so the
    first attempt offers a settings shortcut: enable **Allow from this source** for whichever
    app downloaded it (your browser or file manager), then go back and tap **Install**.
@@ -84,8 +84,7 @@ Notes:
   any supported phone and on emulators.
 - It is signed with the project's own **release key** (RSA 4096). The keystore is deliberately
   kept outside this repository and is never committed, so a clone cannot build a release APK that
-  Android will accept as an update to a published one. Without `android/key.properties`, release
-  builds fall back to the debug key, which is fine for local work and not for distribution.
+  Android will accept as an update to a published one.
 - Android ties updates to the signing key, so an APK installed from this page can only be updated
   by another APK from this page. An F-Droid build is signed by F-Droid with its own key, so pick
   one source per device.
@@ -95,8 +94,16 @@ Notes:
 
 ## Releases
 
-Each tagged release carries a ready-to-install APK, its SHA-256, and the commit it was built
-from. The APK is produced with `flutter build apk --release` from that tag.
+Each tagged release carries its SHA-256 and the commit it was built from, with two APK variants:
+
+| Asset | What it is |
+|---|---|
+| `talaria-<version>.apk` | The release build (`flutter build apk --release`). Smaller and faster, and the one to install. |
+| `talaria-<version>-debug.apk` | The debug build (`flutter build apk --debug`). Several times larger and carries debugging support, so it is meant for testing and bug reports rather than daily use. |
+
+Both are universal builds covering arm64-v8a, armeabi-v7a and x86_64. They are signed with
+different keys, so Android will not install one over the other: uninstall the variant you have if
+you want to switch to the other.
 
 ## F-Droid
 
