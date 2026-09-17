@@ -1,0 +1,40 @@
+name: talaria
+description: "Talaria — mobile companion for the Hermes Agent gateway (remote-gateway mode)."
+publish_to: 'none'
+# Version convention (2026-09-11 round): major.minor = feature rounds;
+# +code = every APK build, bumped monotonically. lib/src/app_version.dart
+# mirrors these values for the UI — keep the two in lockstep.
+version: 1.1.0+25
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+  flutter: '>=3.22.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  web_socket_channel: ^3.0.1
+  shared_preferences: ^2.3.2
+  flutter_secure_storage: ^11.0.0
+  http: ^1.2.2
+  crypto: ^3.0.6
+  flutter_local_notifications: ^18.0.1
+  intl: ^0.19.0
+  markdown: ^7.3.0
+  flutter_markdown: ^0.7.7
+  url_launcher: ^6.3.1
+  # 12.x: built-in-Kotlin Android plugin that tracks flutter.compileSdkVersion.
+  # (8.x hardcodes compileSdk 34; 11.x applies KGP which Flutter 3.47 can't
+  # resolve. 12.x needs win32 ^6 -> flutter_secure_storage 11 -> compileSdk 37.)
+  file_picker: ^12.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/logo.png

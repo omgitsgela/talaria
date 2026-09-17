@@ -1,0 +1,43 @@
+# Flutter / Dart
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+.idea/
+.vscode/
+
+# Android
+android/local.properties
+android/.gradle/
+android/app/debug/
+android/app/profile/
+android/app/release/
+*.jks
+*.keystore
+key.properties
+
+# Build artifacts
+*.apk
+*.aab
+*.ipa
+*.dSYM/
+
+# Internal engineering logs (kept outside the repo; see ~/talaria-internal/)
+BUILD-RECEIPT*
+build-receipts/
+
+# Local secrets / machine-specific config
+.env
+.env.*
+*.pem
+*.key
+*.p12
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+*.orig
+*~

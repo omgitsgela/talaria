@@ -1,0 +1,67 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Talaria talks to the gateway over the network. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <!-- Android 13+ notification permission. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- Keep the socket (and streaming) alive while the app is in the
+         background. A foreground service is the standard way to keep the
+         Dart isolate (and its WebSocket) alive once the OS would otherwise
+         reap the backgrounded process. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
+
+    <application
+        android:allowBackup="false"
+        android:usesCleartextTraffic="true"
+        android:label="Talaria"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme"
+              />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+
+        <!-- Foreground service that keeps the gateway WebSocket (and the Dart
+             isolate) alive while the app is backgrounded, so background task
+             execution and late events are not missed. `specialUse` (not
+             `dataSync`): dataSync services are time-budgeted on Android 15 and
+             the OS would stop an always-on socket; specialUse exempts the
+             connection-keep-alive lifetime. Started/stopped by the Flutter
+             side on connect/close, independent of whether a turn is running. -->
+        <service
+            android:name=".TalariaForegroundService"
+            android:exported="false"
+            android:stopWithTask="true"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the Hermes gateway WebSocket connection alive in the background so task execution continues and replies are delivered."/>
+            <intent-filter>
+                <action android:name="com.talaria.talaria.FOREGROUND_SERVICE"/>
+            </intent-filter>
+        </service>
+
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+    </application>
+</manifest>
