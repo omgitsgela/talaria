@@ -514,7 +514,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 _ChatAppbar(store: store),
                 Expanded(
                   child: messages.isEmpty && !store.streaming
-                      ? _EmptyState(store: store)
+                      ? (store.awaitingTranscript
+                          ? _LoadingConversation(store: store)
+                          : _EmptyState(store: store))
                       : Stack(
                           children: [
                             // Content-size changes (expanding/collapsing a
@@ -1346,6 +1348,62 @@ class _ChatAppbar extends StatelessWidget {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+/// Shown while an existing conversation's transcript is still on its way from
+/// the gateway.
+///
+/// Without this the view falls back to [_EmptyState] while the history loads,
+/// which reads as "this is a new conversation" and makes a long conversation
+/// look as though it, and everything else, had disappeared. The conversation's
+/// own title is shown whenever the store already knows it, so the user can see
+/// which conversation is opening rather than guessing.
+class _LoadingConversation extends StatelessWidget {
+  const _LoadingConversation({required this.store});
+  final ChatStore store;
+
+  String? get _title {
+    final id = store.activeStoredSessionId;
+    if (id == null || id.isEmpty) return null;
+    for (final s in store.sessions) {
+      if (s.id == id && s.title.trim().isNotEmpty) return s.title.trim();
+    }
+    return null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final title = _title;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(
+              width: 28,
+              height: 28,
+              child: CircularProgressIndicator(strokeWidth: 2.5),
+            ),
+            const SizedBox(height: 20),
+            Text('Loading conversation…',
+                style: theme.textTheme.titleMedium
+                    ?.copyWith(fontWeight: FontWeight.w600)),
+            const SizedBox(height: 8),
+            Text(
+              title == null
+                  ? 'Fetching the history from your gateway.'
+                  : 'Fetching “$title” from your gateway.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium?.copyWith(color: muted),
+            ),
+          ],
+        ),
       ),
     );
   }

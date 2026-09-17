@@ -58,6 +58,12 @@ class ParityGateway extends GatewayClient {
     if (responses.containsKey(method)) return responses[method]!;
     // Sensible default: a resume establishes a live session keyed off the
     // requested id, so store methods that need an active session work.
+    if (method == 'session.create') {
+      return {
+        'session_id': 'live-draft',
+        'session_key': 'stored-draft',
+      };
+    }
     if (method == 'session.resume') {
       final key = (params['session_id'] ?? 'stored') as String;
       return {

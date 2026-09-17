@@ -108,6 +108,28 @@ class ChatStore extends ChangeNotifier {
       0; // Bumped on every lifecycle transition to invalidate in-flight attach results.
   bool _loadingSession = false;
   bool get loadingSession => _loadingSession;
+
+  /// The runtime id the gateway most recently HANDED US for the active
+  /// conversation (from `session.create` or `session.resume`). Holding it is
+  /// evidence the session is live without asking the gateway again, and it is
+  /// dropped when the socket does, because a WS disconnect is what detaches and
+  /// reaps runtime ids on the gateway side.
+  String? _verifiedLiveSessionId;
+
+  /// Test seam: the runtime id currently trusted as live, if any.
+  String? get verifiedLiveSessionIdForTest => _verifiedLiveSessionId;
+
+  /// True while the transcript of the active conversation is still expected from
+  /// the gateway and nothing is on screen yet: a resume or history load in
+  /// flight, or a deferred history pull armed for an empty transcript (see
+  /// [_sessRefreshPending]).
+  ///
+  /// The transcript view uses this to show a loading state instead of the
+  /// "new conversation" empty state. A long conversation can take a moment to
+  /// load, and falling back to "Ask Hermes anything" reads as though the
+  /// conversation, and possibly the whole roster, had been lost.
+  bool get awaitingTranscript =>
+      _messages.isEmpty && (_loadingSession || _sessRefreshPending);
   String? _activeStoredSessionId;
   String? get activeStoredSessionId => _activeStoredSessionId;
   String? _activeSessionId;
@@ -908,6 +930,7 @@ class ChatStore extends ChangeNotifier {
         return;
       }
       _activeSessionId = sid;
+      _verifiedLiveSessionId = sid;
       _activeStoredSessionId = null;
       _messages.clear();
       _streaming = false;
@@ -953,6 +976,11 @@ class ChatStore extends ChangeNotifier {
       // alive so the backoff retry can recover the socket in the background;
       // the keep-alive foreground service must NOT be dropped here.
       _streaming = false;
+    }
+    if (s != GwConnectionState.open) {
+      // A dropped socket detaches the runtime id on the gateway, so the id we
+      // were handed is no longer evidence of a live session.
+      _verifiedLiveSessionId = null;
     }
     if (s == GwConnectionState.open) {
       // Global sessions.changed frames have no replay watermark. If another
@@ -1014,19 +1042,30 @@ class ChatStore extends ChangeNotifier {
     return DateTime.now().difference(last) >= _staleRecoveryCooldown;
   }
 
-  Future<void> _recoverStaleActiveSession(String storedId) async {
-    if (storedId.isEmpty) return;
-    if (_client.state != GwConnectionState.open) return;
+  /// Re-attach a stored conversation whose runtime id no longer resolves.
+  /// Returns true when a live session was established (or a re-attach is
+  /// already in flight and owns it), false when the attempt failed — callers
+  /// that MUST have a live session (a model switch) treat false as "cannot
+  /// target this conversation" rather than sending a request that the gateway
+  /// will answer with a success envelope while applying nothing.
+  Future<bool> _recoverStaleActiveSession(String storedId) async {
+    if (storedId.isEmpty) return false;
+    if (_client.state != GwConnectionState.open) return false;
     // A re-resume in flight (user or previous 4001) already owns the
     // transcript transition — a racing duplicate would clear it twice.
-    if (_loadingSession || _recoveringStale || _disposed) return;
+    if (_loadingSession || _recoveringStale || _disposed) return true;
     _recoveringStale = true;
     _lastStaleRecoveryAt = DateTime.now();
     try {
-      await resumeSession(storedId, silent: true);
+      // resumeSession reports whether it actually established a live session;
+      // it handles its own failures, so its return value (not an exception) is
+      // the signal a caller needs.
+      final ok = await resumeSession(storedId, silent: true);
       _pendingJumpToBottom = false;
+      return ok;
     } catch (_) {
       // Best-effort; the cooldown gates the next attempt.
+      return false;
     } finally {
       _recoveringStale = false;
     }
@@ -1550,6 +1589,7 @@ class ChatStore extends ChangeNotifier {
       timeout: const Duration(seconds: 20),
     );
     _activeSessionId = null;
+    _verifiedLiveSessionId = null;
     _messages.clear();
     _streaming = false;
     _statusLine = '';
@@ -1611,13 +1651,18 @@ class ChatStore extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
-  Future<void> resumeSession(String id, {bool silent = false}) async {
-    if (_client.state != GwConnectionState.open) return;
+  /// Returns true when a LIVE session was established (the gateway handed back
+  /// a runtime id). Callers that MUST have a switchable target treat false as
+  /// "this conversation cannot be targeted yet" rather than sending a request
+  /// that the gateway answers with a success envelope while applying nothing.
+  Future<bool> resumeSession(String id, {bool silent = false}) async {
+    if (_client.state != GwConnectionState.open) return false;
     final generation = ++_selection;
     ++_attachGen;
     _loadingSession = true;
     _pendingRequest = null;
     _statusLine = '';
+    var established = false;
     if (!silent) notifyListeners();
     try {
       // Detach the outgoing session's gateway images BEFORE switching.
@@ -1628,17 +1673,18 @@ class ChatStore extends ChangeNotifier {
         sessionId: _activeSessionId,
         timeout: const Duration(seconds: 20),
       );
-      if (_disposed || generation != _selection) return;
+      if (_disposed || generation != _selection) return false;
       if (!detachResult && _pendingAttachments.isNotEmpty) {
         _fail('Could not clear previous attachments: detach failed');
-        return;
+        return false;
       }
       final res = await _client.request('session.resume', {'session_id': id});
-      if (_disposed || generation != _selection) return;
+      if (_disposed || generation != _selection) return false;
       final sid = res['session_id'];
       if (sid is! String || sid.isEmpty)
         throw GatewayError('Resume returned no live session ID');
       _activeSessionId = sid;
+      _verifiedLiveSessionId = sid;
       _activeStoredSessionId =
           (res['resumed'] ?? res['session_key'] ?? id).toString();
       _messages.clear();
@@ -1648,8 +1694,9 @@ class ChatStore extends ChangeNotifier {
       // send the reply to the wrong session_id.
       _pendingRequest = null;
       _hydrateFromResume(res);
+      established = true;
     } catch (e) {
-      if (_disposed || generation != _selection) return;
+      if (_disposed || generation != _selection) return false;
       // A failed resume must not discard the pending attachments —
       // their refs are still queued in the gateway and the user is
       // still on (or returned to) the old session.
@@ -1672,6 +1719,7 @@ class ChatStore extends ChangeNotifier {
         notifyListeners();
       }
     }
+    return established;
   }
 
   void _hydrateFromResume(Map<String, dynamic> res) {
@@ -1803,6 +1851,7 @@ class ChatStore extends ChangeNotifier {
         return;
       }
       _activeSessionId = sid;
+      _verifiedLiveSessionId = sid;
       // A newly created conversation has no resumed/persisted session key yet.
       // Keeping the previous key here made title/roster UI claim the new chat
       // was still the old stored conversation.
@@ -2435,6 +2484,7 @@ class ChatStore extends ChangeNotifier {
       return null;
     }
     _activeSessionId = sid;
+    _verifiedLiveSessionId = sid;
     return sid;
   }
 
@@ -2970,31 +3020,93 @@ class ChatStore extends ChangeNotifier {
   /// draft (no session yet) or a stale runtime id (reaped after a WS detach)
   /// leaves the conversation on its old model while the header shows the new
   /// one. Create the draft's session / re-attach the reaped runtime first.
-  Future<void> _ensureModelSwitchTarget() async {
+  Future<bool> _ensureModelSwitchTarget() async {
+    if (_client.state != GwConnectionState.open) return false;
+
+    // A load or re-attach that is already in flight owns the runtime id, and
+    // during one the id is either missing (about to be assigned) or the one
+    // being replaced. Wait for it to settle BEFORE choosing a branch: picking a
+    // model immediately after opening a conversation is exactly this case, and
+    // branching early would either pin the outgoing id or create a throwaway
+    // draft session for a conversation that is already loading.
+    await _awaitSessionSettled();
+
     final sid = _activeSessionId;
     if (sid == null || sid.isEmpty) {
+      // A genuine draft (nothing loading, no session yet): the switch needs a
+      // session to pin to, so create one.
       await _ensureSession();
-      return;
+      final created = _activeSessionId;
+      return created != null && created.isNotEmpty;
     }
-    if (_client.state != GwConnectionState.open) return;
+
+    final liveness = await _targetIsLive(sid);
+    if (liveness != false) return true; // live, or unknowable: do not block
+
+    // Known stale (a reaped runtime id): re-attach the STORED conversation. A
+    // successful resume hands back a FRESH runtime id, and that id is itself
+    // proof the session is live — do not require the live list to already
+    // mention it, because the list can lag a resume.
+    final stored = _activeStoredSessionId;
+    if (stored != null && stored.isNotEmpty) {
+      // A successful re-attach IS the proof of liveness: the gateway handed back
+      // a runtime id for it. Do not require the live list to already mention
+      // that id (the list can lag) nor that the id differ from the stale one.
+      final reattached = await _recoverStaleActiveSession(stored);
+      await _awaitSessionSettled();
+      // A failed re-attach is evidence, not something to paper over: refuse
+      // rather than pinning a model to an id the gateway no longer resolves.
+      if (!reattached) return false;
+      final fresh = _activeSessionId;
+      if (fresh == null || fresh.isEmpty) return false;
+      return true;
+    }
+
+    // No stored key to re-attach (a draft this app created). An id the gateway
+    // handed us, with no drop having invalidated it, is live enough to pin to:
+    // a brand-new session can be missing from the live list for a moment.
+    return sid == _verifiedLiveSessionId;
+  }
+
+  /// Live / not-live / unknown for [sid], from the gateway's live session list.
+  /// `null` means the list could not be read at all, which must NOT block a
+  /// switch: the probe is a guard against a known-bad target, not a gate.
+  Future<bool?> _targetIsLive(String sid) async {
     try {
       final res = await _client
           .request('session.active_list', {'current_session_id': sid});
-      if (_disposed) return;
+      if (_disposed) return null;
       final list = res['sessions'];
-      if (list is! List) return;
-      final live = list.any((row) =>
+      if (list is! List) return null;
+      return list.any((row) =>
           row is Map &&
           ((row['session_id'] ?? row['id'] ?? '').toString() == sid));
-      if (live) return;
-      final stored = _activeStoredSessionId;
-      if (stored != null && stored.isNotEmpty) {
-        await _recoverStaleActiveSession(stored);
-      }
     } catch (_) {
-      // Best-effort probe: never block a model switch on it.
+      return null;
     }
   }
+
+  /// Wait, bounded, for an in-flight conversation load or stale-session
+  /// re-attach to finish. [_recoverStaleActiveSession] refuses to run while
+  /// either flag is set, so without this a switch issued during a load would
+  /// probe the outgoing id and pin nothing on the gateway.
+  Future<void> _awaitSessionSettled({int maxWaitMs = 8000}) async {
+    if (!_loadingSession && !_recoveringStale) return;
+    _settleWaitCount++;
+    final deadline = DateTime.now().add(Duration(milliseconds: maxWaitMs));
+    while (!_disposed &&
+        (_loadingSession || _recoveringStale) &&
+        DateTime.now().isBefore(deadline)) {
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    }
+  }
+
+  int _settleWaitCount = 0;
+
+  /// Test seam: how many times a probe had to wait for an in-flight load or
+  /// re-attach to settle before it could name a live session.
+  int get settleWaitCountForTest => _settleWaitCount;
+  void resetSettleWaitCountForTest() => _settleWaitCount = 0;
 
   /// Switch the model for the active session via `config.set model`. [value]
   /// may carry provider flags (e.g. `openai/gpt-5`). When the gateway flags
@@ -3006,10 +3118,20 @@ class ChatStore extends ChangeNotifier {
       return const SetModelResult(status: SetModelStatus.disconnected);
     }
     // The switch must land on THIS conversation's live record, or the pick
-    // pins nowhere (see _ensureModelSwitchTarget).
-    await _ensureModelSwitchTarget();
+    // pins nowhere (see _ensureModelSwitchTarget). When the target cannot be
+    // made live, do NOT send the switch: the gateway answers a success
+    // envelope for an unresolvable session while applying nothing, which shows
+    // the new model in the header and keeps running the old one.
+    final targeted = await _ensureModelSwitchTarget();
     if (_disposed) {
       return const SetModelResult(status: SetModelStatus.disconnected);
+    }
+    if (!targeted) {
+      final msg =
+          'The model was not changed: this conversation is not live on the gateway yet. '
+          'Try again once it has finished loading.';
+      _fail(msg);
+      return SetModelResult(status: SetModelStatus.error, error: msg);
     }
     try {
       final res = await _client.request('config.set', {
@@ -3029,6 +3151,20 @@ class ChatStore extends ChangeNotifier {
         );
       }
       final applied = (res['value'] ?? value).toString();
+      // The gateway always reports a `warning` field and uses it to say the
+      // pick could NOT be applied (it runs its selection guards, and on a
+      // warning applies nothing while still answering success). Reporting that
+      // as applied is how the header ends up disagreeing with the model that
+      // actually runs.
+      final warning = (res['warning'] ?? '').toString().trim();
+      if (warning.isNotEmpty) {
+        _fail('Model not changed: $warning');
+        return SetModelResult(
+          status: SetModelStatus.error,
+          value: applied,
+          error: warning,
+        );
+      }
       // Parse the `--provider X` suffix that the gateway returns verbatim
       // (the picker appends it when the model lives under a named provider).
       final parts = applied.split(' --provider ');
@@ -3038,6 +3174,18 @@ class ChatStore extends ChangeNotifier {
           provider: liveProvider != null && liveProvider.isNotEmpty
               ? liveProvider
               : null);
+      // `deferred` is the gateway's stashed-while-a-turn-streams path: the pick
+      // is applied at the NEXT turn start and the gateway deliberately displays
+      // it meanwhile. Show it, but say when it takes effect instead of implying
+      // the conversation is already running it.
+      if (res['deferred'] == true) {
+        _statusLine = 'Model: $applied (applies from the next turn)';
+        _notify();
+        return SetModelResult(
+          status: SetModelStatus.deferred,
+          value: applied,
+        );
+      }
       _statusLine = 'Model: $applied';
       _notify();
       return SetModelResult(

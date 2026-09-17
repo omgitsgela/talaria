@@ -3,6 +3,18 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.1.2
+
+### build 27
+- Opening a long conversation now shows a loading state instead of the "Ask Hermes anything" empty
+  state, which made a conversation that was still loading look like a brand new one, and could read
+  as though the rest of the list had gone missing.
+- A model switch is now sent only when the conversation is genuinely live on the gateway. A switch
+  the gateway defers to the next turn, or refuses, is reported as such instead of being shown as
+  applied, which is how the app bar could disagree with the model that actually answered.
+- Searching the model list with no results no longer removes the search field, and offers a Clear
+  search action to get back to the full list.
+
 ## 1.1.1
 
 ### build 26

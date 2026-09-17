@@ -495,7 +495,11 @@ class ProviderGroup {
 /// The gateway's `confirm_required` handshake means a model switch may need
 /// explicit user approval before applying. [SetModelStatus] distinguishes the
 /// three outcomes so callers can present the right UI.
-enum SetModelStatus { success, confirmRequired, error, disconnected }
+/// [deferred] is a real gateway outcome, not a failure: a switch requested
+/// while a turn is streaming is stashed and applied at the NEXT turn start (the
+/// gateway deliberately displays the pick meanwhile). Callers must not present
+/// it as already active.
+enum SetModelStatus { success, confirmRequired, error, disconnected, deferred }
 
 class SetModelResult {
   const SetModelResult({
@@ -527,6 +531,10 @@ class SetModelResult {
         return error;
       case SetModelStatus.disconnected:
         return 'Not connected';
+      case SetModelStatus.deferred:
+        return value.isEmpty
+            ? 'Applies from the next turn'
+            : 'Model: $value (applies from the next turn)';
     }
   }
 }

@@ -46,6 +46,12 @@ class SettingsGateway extends GatewayClient {
     return switch (method) {
       'session.list' => {'sessions': []},
       'session.most_recent' => {'session_id': null},
+      // A model switch on a draft creates the session it pins to (that is what
+      // the app does since the model-switch fix), so the fixture must model it.
+      'session.create' => {
+          'session_id': 'rt-draft',
+          'session_key': 'stored-draft',
+        },
       'session.resume' => {
           'session_id': 'live-${params['session_id']}',
           'resumed': params['session_id'],

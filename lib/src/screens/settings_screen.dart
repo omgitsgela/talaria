@@ -419,12 +419,58 @@ class _ModelListState extends State<_ModelList> {
           ? g
           : ProviderGroup(slug: g.slug, name: g.name, models: matches));
     }
+    // The search field lives outside the result list on purpose: an early
+    // return for "no matches" used to drop it from the tree, which left the
+    // user staring at an empty result with no way to correct the query that
+    // caused it (and no keyboard, since focus died with the field).
+    final searchField = Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 8),
+      child: TextField(
+        controller: _search,
+        minLines: 1,
+        maxLines: 1,
+        textInputAction: TextInputAction.search,
+        decoration: InputDecoration(
+          hintText: 'Search models…',
+          prefixIcon: const Icon(Icons.search, size: 18),
+          isDense: true,
+          filled: true,
+          fillColor: cs.surfaceContainerHighest,
+          contentPadding: const EdgeInsets.symmetric(vertical: 10),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: BorderSide.none,
+          ),
+        ),
+      ),
+    );
+
     if (visible.isEmpty && visibleBookmarks.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Text('No models match “$_query”.',
-            style: theme.textTheme.bodySmall
-                ?.copyWith(color: cs.onSurfaceVariant)),
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          searchField,
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Column(
+              children: [
+                Icon(Icons.search_off,
+                    size: 32, color: cs.onSurfaceVariant.withValues(alpha: 0.7)),
+                const SizedBox(height: 10),
+                Text('No models match “$_query”.',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(color: cs.onSurfaceVariant)),
+                const SizedBox(height: 10),
+                TextButton.icon(
+                  onPressed: _search.clear,
+                  icon: const Icon(Icons.close, size: 16),
+                  label: const Text('Clear search'),
+                ),
+              ],
+            ),
+          ),
+        ],
       );
     }
 
@@ -432,27 +478,7 @@ class _ModelListState extends State<_ModelList> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // Search field.
-        Padding(
-          padding: const EdgeInsets.only(top: 4, bottom: 8),
-          child: TextField(
-            controller: _search,
-            minLines: 1,
-            maxLines: 1,
-            textInputAction: TextInputAction.search,
-            decoration: InputDecoration(
-              hintText: 'Search models…',
-              prefixIcon: const Icon(Icons.search, size: 18),
-              isDense: true,
-              filled: true,
-              fillColor: cs.surfaceContainerHighest,
-              contentPadding: const EdgeInsets.symmetric(vertical: 10),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(14),
-                borderSide: BorderSide.none,
-              ),
-            ),
-          ),
-        ),
+        searchField,
         // Bookmarked models pin above every provider group.
         if (visibleBookmarks.isNotEmpty) ...[
           Padding(
