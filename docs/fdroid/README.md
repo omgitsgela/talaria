@@ -75,7 +75,7 @@ to carry a valid licence or be public domain.
 ```sh
 pip install fdroidserver
 fdroid lint com.ionfyre.talaria.yml
-fdroid build --verbose com.ionfyre.talaria -v 1.2.0
+fdroid build --verbose com.ionfyre.talaria -v 1.2.1
 ```
 
 `fdroid build` needs the Flutter SDK on `PATH` and enough disk for a cold Flutter build.

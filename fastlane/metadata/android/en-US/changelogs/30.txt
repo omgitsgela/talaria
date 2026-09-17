@@ -1,0 +1,3 @@
+* The connection screen offers Sign in with Hermes as soon as it knows your gateway, and keeps the bearer token field available alongside it.
+* The app's own logo replaces a generic icon, the tagline now matches the splash screen, and field explanations wrap instead of being cut off.
+* The README explains in plain language how to reach a gateway: the same Wi-Fi, a private network between your devices, or a hosted gateway somebody shares with you.
