@@ -2,10 +2,13 @@
 
 **Your gateway, in your pocket.**
 
-Talaria is a Flutter mobile client for a self hosted [Hermes Agent](https://hermes-agent.nousresearch.com/docs)
-gateway running in remote gateway mode. It talks to the gateway over HTTP and WebSocket,
-so your phone becomes a second window onto the same conversations, tasks, and goals as the
-desktop app.
+Talaria is a mobile app for a self hosted [Hermes Agent](https://hermes-agent.nousresearch.com/docs)
+gateway running in remote gateway mode. It puts the conversations, goals and tasks you already have
+on your desktop onto your phone: read a reply as it streams, answer a question Hermes is waiting on,
+switch models, and pick up a conversation you started at your desk.
+
+It talks to a gateway you control, not to a service of ours. There is no account to create and
+nothing is sent anywhere else.
 
 This is an unofficial companion. It is not affiliated with or endorsed by Nous Research.
 
@@ -15,184 +18,242 @@ This is an unofficial companion. It is not affiliated with or endorsed by Nous R
 |---|---|---|---|
 | ![Launch splash](docs/screenshots/01-splash.png) | ![A conversation with a thinking trace, a tool call and the context readout](docs/screenshots/02-transcript.png) | ![The conversation list with pinning and time buckets](docs/screenshots/03-roster.png) | ![Settings and the model picker](docs/screenshots/04-settings.png) |
 
-These are renders of the real widgets at phone size, regenerated with
-`flutter test --update-goldens tool/screenshot_gen_test.dart`.
-
 ## Features
 
-- **Live conversation streaming**, including thinking traces, tool activity, and ordered
-  turn parts, with the transcript following the newest message as a reply arrives.
-- **Conversation roster** with pinned chats and time buckets (Today / Yesterday / This
-  week / This month / Older), plus per-conversation status dots and unread position.
-- **Model switching per conversation** from the gateway's own model list, with
-  provider aware routing, reasoning effort, fast mode, and trace visibility toggles.
-- **Context readout in the app bar**, right of the model name: how much of the model's window
-  the conversation is using (`24.5k/128k`), taken from the gateway's own usage report and kept
-  hidden until that report carries a real measurement.
-- **Rich Markdown** replies (selectable text, working links, themed code and blockquote
-  panels) with a per-user render toggle.
-- **Goals, todos, and slash commands** mirrored from the gateway, including a persistent
-  goal bar and clarification or approval cards you can answer from the phone.
-- **Cross client sync**: a conversation touched on the desktop or from a terminal updates
-  here, because the app follows the gateway's session broadcasts.
-- **Notifications** for completed turns and for requests that need your input.
-- **Image and file attachments** staged through the gateway.
-- **Recovery from backgrounding**: a conversation whose runtime session was reaped is
-  re-attached silently, so the next send, Stop, and status indicators keep working.
+- **Replies stream in live**, with thinking traces, tool activity and response text appearing in the
+  order the agent produced them.
+- **Answer Hermes from your phone.** Question and approval prompts arrive as cards you can fill in
+  or approve without going back to your desk.
+- **Conversation list** with pinning and time buckets, so long running work stays where you can find
+  it.
+- **Model, reasoning level and speed per conversation**, chosen from your gateway's own model list.
+- **Context readout** in the top bar, showing how much of the model's window the conversation is
+  using.
+- **Goals**, mirrored from the gateway, with the current goal pinned above the composer.
+- **Slash commands** typed straight into the composer, with suggestions served by your gateway.
+- **Attachments**: send an image or a file through the gateway.
+- **Notifications** for finished replies and for prompts that need you, each opening the right
+  conversation.
+- **Markdown replies** with selectable text and working links, plus a switch to plain text if you
+  prefer.
+- **Syncs with your other clients**, so a conversation touched on the desktop or in a terminal shows
+  the same thing here.
 
-## Requirements
+## What you need
 
-- A running Hermes Agent gateway with its remote gateway surface reachable from the phone.
-- A gateway token, or gateway OAuth if it is enabled.
-- Flutter 3.22 or newer and a working Android toolchain to build.
+- A Hermes Agent gateway you can reach from your phone. If you do not have one running yet, start
+  with the [Hermes Agent documentation](https://hermes-agent.nousresearch.com/docs).
+- A way to authenticate to that gateway: a session or bearer token, or the gateway's own OAuth sign
+  in if it is enabled.
+- An Android phone running **Android 7.0 or newer**.
 
-## Build
-
-```bash
-flutter pub get
-flutter analyze
-flutter test
-flutter build apk --debug        # build/app/outputs/flutter-apk/app-debug.apk
-```
-
-`flutter run` also works against a connected device or emulator.
-
-The Android toolchain needs JDK 21. If your JDK is not the one Gradle would pick by
-default, point Gradle at it outside the repository, for example in
-`~/.gradle/gradle.properties`:
-
-```properties
-org.gradle.java.home=/path/to/jdk-21
-```
-
-## Install on Android (sideloading)
+## Install on Android
 
 Talaria is not on Google Play. Install the APK from the
 [Releases](https://github.com/omgitsgela/talaria/releases) page:
 
-1. On the phone, open the release and download `talaria-<version>.apk`.
-2. Tap the downloaded file. Android blocks installs from unknown sources by default, so the
-   first attempt offers a settings shortcut: enable **Allow from this source** for whichever
-   app downloaded it (your browser or file manager), then go back and tap **Install**.
+1. On your phone, open the release and download `talaria-<version>.apk`. That is the release build.
+   A much larger debug build is published alongside it if you want to help test or file a bug.
+2. Tap the downloaded file. Android blocks installs from unknown sources by default, so the first
+   attempt offers a settings shortcut: enable **Allow from this source** for whichever app downloaded
+   it (your browser or your file manager), then go back and tap **Install**.
 3. Play Protect may warn that the developer is unknown. Choose **Install anyway**. That warning
    appears for anything installed outside Play.
-4. Open Talaria, enter the gateway URL and token, and connect.
+4. Open Talaria and connect it to your gateway, as described below.
 
-Notes:
+Worth knowing:
 
-- The APK is a **universal release build** (arm64-v8a, armeabi-v7a and x86_64), so it runs on
-  any supported phone and on emulators.
-- It is signed with the project's own **release key** (RSA 4096). The keystore is deliberately
-  kept outside this repository and is never committed, so a clone cannot build a release APK that
-  Android will accept as an update to a published one.
-- Android ties updates to the signing key, so an APK installed from this page can only be updated
-  by another APK from this page. An F-Droid build is signed by F-Droid with its own key, so pick
-  one source per device.
-- Requires **Android 7.0 (API 24) or newer**.
-- Your phone must be able to reach the gateway. A gateway on your own network means the same
-  Wi-Fi network.
+- The release APK is universal (arm64-v8a, armeabi-v7a and x86_64), so it runs on any supported
+  phone and on emulators.
+- **Install from one source and stay with it.** Android ties updates to the signing key, so an APK
+  from the Releases page can only be updated by another APK from the Releases page, and an F-Droid
+  build is signed separately. Switching between the release and debug builds also needs an uninstall
+  first.
 
-## Releases
+## Get signed in
 
-Each tagged release carries its SHA-256 and the commit it was built from, with two APK variants:
+On first launch Talaria asks for two things.
 
-| Asset | What it is |
+**Gateway URL** is where your gateway listens, for example `http://gateway.local:9119` or
+`http://192.168.1.50:9119`. If your gateway is on your home network, your phone needs to be on the
+same Wi-Fi.
+
+**Authentication** depends on how your gateway is set up, and the screen shows the field that
+matches:
+
+| Field | When it applies |
 |---|---|
-| `talaria-<version>.apk` | The release build (`flutter build apk --release`). Smaller and faster, and the one to install. |
-| `talaria-<version>-debug.apk` | The debug build (`flutter build apk --debug`). Several times larger and carries debugging support, so it is meant for testing and bug reports rather than daily use. |
+| **Session token** | The `X-Hermes-Session-Token` value your gateway dashboard shows. This is what loopback or `--insecure` gateways use. |
+| **Bearer token** | An OAuth bearer token, used by gated or publicly reachable gateways. |
+| **Sign in with Hermes** | Offered instead of the token fields when your gateway advertises the native OAuth flow. It opens your system browser and Talaria catches the callback, then stores the token on the device. |
 
-Both are universal builds covering arm64-v8a, armeabi-v7a and x86_64. They are signed with
-different keys, so Android will not install one over the other: uninstall the variant you have if
-you want to switch to the other.
+Tap **Connect**. When it works you land on the conversation view, and Talaria remembers the address
+and token so you only do this once per gateway. Your credentials are kept in Android's Keystore
+backed secure storage, not in plain preferences.
+
+If the connection fails, the screen tells you what the gateway said. The usual causes are a typo in
+the address or port, the phone being on a different network from the gateway, a gateway that is not
+running in remote gateway mode, or the wrong kind of token for that gateway.
+
+## Using the app
+
+The top bar holds three things: your **conversation list**, a **new conversation** button, and
+**Settings**. Next to the model name in the middle is the context readout.
+
+### Conversations
+
+Tap the conversation list to see everything your gateway knows about, newest first, with pinned
+conversations at the top and the rest grouped by age (Today, Yesterday, This week, This month,
+Older).
+
+Each row has a menu:
+
+| Action | What it does |
+|---|---|
+| **Pin to top** | Keeps that conversation in the pinned group at the top of the list. Pinning is stored on this phone, so it does not change anything on the gateway. |
+| **Rename** | Sets a new title for the conversation. |
+| **Hide from list** | Removes it from your list without deleting it on the gateway. |
+| **Compress context** | Asks the gateway to compress the conversation's history, which frees up context window space. |
+| **Move workspace** | Points the conversation at a different workspace folder, given as an absolute path. |
+| **Delete** | Deletes the conversation on the gateway. You are asked to confirm. |
+
+A conversation that is currently running on the gateway shows a status dot, and an unread marker
+remembers how far you had read.
+
+### Sending a message
+
+Type in the composer and tap send, or use the keyboard's send action. While a reply is streaming the
+send button becomes **Stop**, which interrupts the turn. You can also type and send during a turn:
+the message goes to the gateway as a queued message for the running turn rather than starting a
+separate one.
+
+### Thinking traces
+
+When your model produces reasoning, it appears in the reply as a collapsible section you can expand
+to read. Turn it off entirely in the model settings sheet or in Settings if you would rather only
+see the answer.
+
+### Model, reasoning and speed
+
+Tap the model name in the top bar to open that conversation's settings:
+
+- **Model**, chosen from your gateway's own list, with search and bookmarks for the ones you use
+  most.
+- **Reasoning level**, from minimal through to the higher effort levels, or off.
+- **Fast**, which asks the gateway for its priority service tier.
+- **Show thinking traces**, the display toggle described above.
+
+These apply to the conversation you are in, and a change takes effect from the next turn. Different
+conversations can run different models, which makes it easy to keep an expensive model for hard work
+and a cheap one for the rest.
+
+### Context readout
+
+The `24.5k/128k` beside the model name is how much of that model's context window the conversation is
+currently using, taken from the gateway's own usage report. It stays hidden until the gateway reports
+a real measurement rather than guessing. If it approaches the maximum, **Compress context** from the
+conversation menu is the way to free space.
+
+### Slash commands
+
+Type `/` in the composer and Talaria asks your gateway which commands it offers, then shows matching
+suggestions you can tap to insert. Because the list comes from the gateway, it reflects your own
+setup. `/goal` is a good one to know: it sets a goal for the session.
+
+### Goals
+
+While a goal is active, it sits above the composer so you always know what the session is working
+toward. The **X** on the bar clears the goal on the gateway.
+
+### Questions and approval prompts
+
+When Hermes needs a decision, a card appears in the conversation:
+
+- **Questions** show each thing it needs to know. Pick one of the offered choices, or type an
+  answer where the card asks for one. A tick marks each question as you answer it, and the card
+  clears once the last answer is sent.
+- **Approvals** show the options your gateway offers, which are usually **Allow once**, **Allow this
+  session**, **Always allow** and **Deny**. If your gateway does not offer a set of options you get
+  **Approve** and **Deny** instead.
+
+**Dismiss** cancels the request if you would rather answer it later or from the desktop.
+
+### Attachments
+
+The composer has buttons to attach an image or a file, both staged through the gateway. Attachments
+appear above the input with a remove button until you send them.
+
+### Notifications
+
+Talaria notifies you through a **Hermes replies** channel when a reply finishes and when Hermes needs
+input. Tapping a notification opens that conversation. A quiet ongoing notification keeps your
+connection to the gateway alive while the app is in the background, which is what lets replies keep
+arriving.
+
+### Settings
+
+- **Appearance**: follow the system theme, or force light or dark.
+- **Display**: render Markdown in replies, or turn it off for plain text.
+- **Model**: browse the gateway's models and profiles, and see which sessions are live.
+- **About**: the app version.
+
+The connection menu lives in Settings too, with **Reconnect**, **Disconnect** and **Quit Talaria**.
+
+## Troubleshooting
+
+**It will not connect.** Check the address and port, confirm the phone is on the same network as the
+gateway, and confirm the gateway is running in remote gateway mode. If your gateway requires OAuth,
+use the sign in option rather than pasting a token.
+
+**The token is rejected.** Session tokens and bearer tokens are different things and are not
+interchangeable. Make sure you copied the value your gateway expects for the field you are using.
+
+**Android will not install the APK.** Enable installs from your browser or file manager when the
+prompt offers the shortcut, then tap Install again. If you already have the debug build installed,
+uninstall it first: the two are signed with different keys, so Android refuses to replace one with
+the other.
+
+**Play Protect warns about the developer.** Expected for any app installed outside Play. Choose
+Install anyway if you are happy with where the APK came from, and see the Releases page for the
+SHA-256 to check it.
+
+**Replies stop arriving when the app is in the background.** Android may be restricting background
+work. Allow Talaria to run in the background and exclude it from battery optimisation, and leave the
+ongoing notification in place.
+
+**A long conversation looks empty for a moment.** Opening a large conversation takes a second to load
+its history. If it stays empty, tap Reconnect from the connection menu.
+
+**The model did not change.** Model and reasoning settings belong to the conversation you opened them
+in, and a change applies from the next turn rather than to a reply already in flight.
 
 ## F-Droid
 
-Preparation in progress, not yet submitted. F-Droid builds every app from source and signs it
-with its own key, so the app's own signing key does not matter to them:
+Not on F-Droid yet. The submission is prepared and the recipe is in
+[`docs/fdroid/README.md`](docs/fdroid/README.md).
 
-- Recipe: [`docs/fdroid/com.talaria.talaria.yml`](docs/fdroid/com.talaria.talaria.yml), the
-  metadata file that gets submitted to
-  [fdroiddata](https://gitlab.com/fdroid/fdroiddata).
-- Already true of this project: open-source dependencies only (MIT, BSD and Apache-2.0), no
-  tracking or analytics, no prebuilt binaries in the tree, and tagged releases whose commits
-  build with `flutter build apk --release`.
-- To submit: add the metadata file to a fork of `fdroiddata` under `metadata/` and open a merge
-  request. F-Droid builds, signs and hosts the result.
+## Privacy and security
 
-## Configuration
+- Talaria talks **only** to the gateway you configure. There is no telemetry, no analytics, and no
+  third party service involved.
+- Your gateway URL and token are stored in Android's Keystore backed secure storage on the device.
+- Plain HTTP is allowed so the app can reach a gateway on your own network. If your gateway is
+  reachable from outside your LAN, put it behind TLS and use an `https://` address.
+- Conversations are read from your gateway and displayed. The app does not copy them anywhere else.
 
-Open the app, enter the gateway URL (for example `http://gateway.local:9119`) and your
-token, and connect. The connection settings, including the token, are stored with
-`flutter_secure_storage` (Android Keystore backed), not in plain preferences.
+## Contributing
 
-## Architecture
-
-```
-lib/
-  main.dart                     app entry, connection persistence, notification routing
-  src/
-    app_scope.dart              app level dependency scope
-    app_version.dart            version and build code shown in the UI
-    diagnostics/error_report.dart  copyable crash reports for debug builds
-    gateway/
-      client.dart               JSON RPC + WebSocket transport, event stream
-      config.dart               gateway URL / token model and URL derivation
-      http_service.dart         HTTP side of the gateway surface
-      native_oauth.dart         gateway OAuth handshake
-      oauth_flow.dart           credential storage and refresh
-    models/                     conversation, message, tool and goal models,
-                                including context_usage.dart for the app bar readout
-    notifications/              foreground service and local notifications
-    screens/                    connection, home (transcript), settings, splash
-    store/
-      chat_store.dart           application state: sessions, transcript, turns
-      app_model.dart            app level state
-    theme/                      theme, Markdown, and preference plumbing
-    widgets/message_bubble.dart  one transcript row, memoized per revision
-```
-
-The app speaks the gateway's JSON RPC methods: `session.create`, `session.most_recent`,
-`session.list`, `session.active_list`, `session.resume`, `session.history`,
-`session.close`, `session.delete`, `prompt.submit`, `session.interrupt`, `slash.exec`,
-`session.compress`, `config.get`, `config.set`, `clarify.respond`, and
-`approval.respond`, plus the gateway's WebSocket event stream.
-
-## Testing
-
-```bash
-flutter test
-```
-
-The suite covers the gateway transport contracts, transcript rendering and scrolling,
-model and reasoning plumbing, session recovery, and the Markdown theming paths.
-
-`tool/screenshot_gen_test.dart` regenerates the images in `docs/screenshots/` from the real
-widgets. It lives outside `test/` on purpose, so `flutter test` never golden-compares the
-screenshots and a UI change cannot fail CI because a picture is stale:
-
-```bash
-flutter test --update-goldens tool/screenshot_gen_test.dart
-```
-
-## Security notes
-
-- `android:usesCleartextTraffic="true"` is enabled so the app can talk to a plain HTTP
-  gateway on your own network. If your gateway is reachable beyond your LAN, put it
-  behind TLS and use an `https://` URL.
-- The app only connects to the gateway you configure. There is no telemetry and no
-  third party analytics.
-
-## Acknowledgements
-
-Talaria is an independent client. It contains no Hermes Agent source code: it speaks the
-gateway's documented JSON RPC and WebSocket protocol over the network.
-
-- [Hermes Agent](https://hermes-agent.nousresearch.com/docs) by Nous Research, released
-  under the MIT License, is the backend this app is built for.
-- Several comments cite the gateway's own source paths (`tui_gateway/...`) and the desktop
-  app's patterns (`apps/desktop/...`) so a reader can verify the protocol contract against
-  the reference implementation. Those are citations, not copied code.
+Build instructions, the test suite, the architecture notes and the release process are in
+[CONTRIBUTING.md](CONTRIBUTING.md). Bug reports and pull requests are welcome through the repository's
+issue tracker.
 
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
+## Acknowledgements
+
+Talaria is an independent client and contains no Hermes Agent source code. It speaks the gateway's
+documented JSON RPC and WebSocket protocol over the network.
+[Hermes Agent](https://hermes-agent.nousresearch.com/docs) by Nous Research, released under the MIT
+License, is the backend this app is built for.
