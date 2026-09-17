@@ -3,6 +3,13 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.1.1
+
+### build 26
+- The app bar now shows how much of the model's context window the current conversation is
+  using, right of the model name, for example `24.5k/128k`. It stays hidden until the gateway
+  reports a real measurement, so it never shows a fabricated 0%.
+
 ## 1.1.0
 
 ### build 25

@@ -9,6 +9,15 @@ desktop app.
 
 This is an unofficial companion. It is not affiliated with or endorsed by Nous Research.
 
+## Screenshots
+
+| Launch | Conversation | Conversations | Settings |
+|---|---|---|---|
+| ![Launch splash](docs/screenshots/01-splash.png) | ![A conversation with a thinking trace, a tool call and the context readout](docs/screenshots/02-transcript.png) | ![The conversation list with pinning and time buckets](docs/screenshots/03-roster.png) | ![Settings and the model picker](docs/screenshots/04-settings.png) |
+
+These are renders of the real widgets at phone size, regenerated with
+`flutter test --update-goldens tool/screenshot_gen_test.dart`.
+
 ## Features
 
 - **Live conversation streaming**, including thinking traces, tool activity, and ordered
@@ -17,6 +26,9 @@ This is an unofficial companion. It is not affiliated with or endorsed by Nous R
   week / This month / Older), plus per-conversation status dots and unread position.
 - **Model switching per conversation** from the gateway's own model list, with
   provider aware routing, reasoning effort, fast mode, and trace visibility toggles.
+- **Context readout in the app bar**, right of the model name: how much of the model's window
+  the conversation is using (`24.5k/128k`), taken from the gateway's own usage report and kept
+  hidden until that report carries a real measurement.
 - **Rich Markdown** replies (selectable text, working links, themed code and blockquote
   panels) with a per-user render toggle.
 - **Goals, todos, and slash commands** mirrored from the gateway, including a persistent
@@ -53,6 +65,49 @@ default, point Gradle at it outside the repository, for example in
 org.gradle.java.home=/path/to/jdk-21
 ```
 
+## Install on Android (sideloading)
+
+Talaria is not on Google Play. Install the APK from the
+[Releases](https://github.com/omgitsgela/talaria/releases) page:
+
+1. On the phone, open the release and download the `.apk` asset.
+2. Tap the downloaded file. Android blocks installs from unknown sources by default, so the
+   first attempt offers a settings shortcut: enable **Allow from this source** for whichever
+   app downloaded it (your browser or file manager), then go back and tap **Install**.
+3. Play Protect may warn that the developer is unknown. Choose **Install anyway**. That warning
+   appears for anything installed outside Play.
+4. Open Talaria, enter the gateway URL and token, and connect.
+
+Notes:
+
+- The APK is a **universal release build** (arm64-v8a, armeabi-v7a and x86_64), so it runs on
+  any supported phone and on emulators.
+- It is signed with the standard **Android debug key**, which is the Flutter default until a
+  real keystore is configured. It installs and runs normally, but it cannot replace an install
+  signed with a different key, and it is not a production signing key.
+- Requires **Android 7.0 (API 24) or newer**.
+- Your phone must be able to reach the gateway. A gateway on your own network means the same
+  Wi-Fi network.
+
+## Releases
+
+Each tagged release carries a ready-to-install APK, its SHA-256, and the commit it was built
+from. The APK is produced with `flutter build apk --release` from that tag.
+
+## F-Droid
+
+Preparation in progress, not yet submitted. F-Droid builds every app from source and signs it
+with its own key, so the app's own signing key does not matter to them:
+
+- Recipe: [`docs/fdroid/com.talaria.talaria.yml`](docs/fdroid/com.talaria.talaria.yml), the
+  metadata file that gets submitted to
+  [fdroiddata](https://gitlab.com/fdroid/fdroiddata).
+- Already true of this project: open-source dependencies only (MIT, BSD and Apache-2.0), no
+  tracking or analytics, no prebuilt binaries in the tree, and tagged releases whose commits
+  build with `flutter build apk --release`.
+- To submit: add the metadata file to a fork of `fdroiddata` under `metadata/` and open a merge
+  request. F-Droid builds, signs and hosts the result.
+
 ## Configuration
 
 Open the app, enter the gateway URL (for example `http://gateway.local:9119`) and your
@@ -74,7 +129,8 @@ lib/
       http_service.dart         HTTP side of the gateway surface
       native_oauth.dart         gateway OAuth handshake
       oauth_flow.dart           credential storage and refresh
-    models/                     conversation, message, tool and goal models
+    models/                     conversation, message, tool and goal models,
+                                including context_usage.dart for the app bar readout
     notifications/              foreground service and local notifications
     screens/                    connection, home (transcript), settings, splash
     store/
@@ -98,6 +154,14 @@ flutter test
 
 The suite covers the gateway transport contracts, transcript rendering and scrolling,
 model and reasoning plumbing, session recovery, and the Markdown theming paths.
+
+`tool/screenshot_gen_test.dart` regenerates the images in `docs/screenshots/` from the real
+widgets. It lives outside `test/` on purpose, so `flutter test` never golden-compares the
+screenshots and a UI change cannot fail CI because a picture is stale:
+
+```bash
+flutter test --update-goldens tool/screenshot_gen_test.dart
+```
 
 ## Security notes
 

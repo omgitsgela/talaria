@@ -1031,7 +1031,9 @@ class _ChatAppbar extends StatelessWidget {
     return SafeArea(
       bottom: false,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        // 10 not 12: the title row carries three buttons, the model name, the
+        // context readout and the status pill.
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         decoration: BoxDecoration(
           border: Border(
               bottom: BorderSide(
@@ -1043,11 +1045,16 @@ class _ChatAppbar extends StatelessWidget {
             IconButton(
               icon: const Icon(Icons.menu_open),
               tooltip: 'Sessions',
+              // Compact density: the title row also carries the model name and
+              // the context readout, and default-density buttons overflowed a
+              // 420dp phone by ~4px once the readout was added.
+              visualDensity: VisualDensity.compact,
               onPressed: () => _showSessions(context, store),
             ),
             IconButton(
               icon: const Icon(Icons.add_comment_outlined),
               tooltip: 'New conversation',
+              visualDensity: VisualDensity.compact,
               onPressed: connected && !store.creatingSession
                   ? () => store.createSession()
                   : null,
@@ -1055,6 +1062,7 @@ class _ChatAppbar extends StatelessWidget {
             IconButton(
               icon: const Icon(Icons.settings_outlined),
               tooltip: 'Settings',
+              visualDensity: VisualDensity.compact,
               onPressed: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
@@ -1095,6 +1103,33 @@ class _ChatAppbar extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
+                          // Current context-window occupancy, right of the model
+                          // name. Hidden until the gateway reports a real
+                          // reading (it omits the field when the engine cannot
+                          // measure occupancy), so it never shows a fake 0%.
+                          if (store.contextLabel != null) ...[
+                            const SizedBox(width: 6),
+                            // Flexible + ellipsis: the title row also carries
+                            // the menu/new/settings buttons and the status pill,
+                            // so on a narrow phone the readout must be able to
+                            // shrink instead of overflowing the row.
+                            Flexible(
+                              child: Tooltip(
+                                message: store.contextUsage.description ?? '',
+                                child: Text(
+                                  store.contextLabel!,
+                                  softWrap: false,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    fontSize: 10,
+                                    color: theme.colorScheme.onSurfaceVariant
+                                        .withValues(alpha: 0.75),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                          const SizedBox(width: 2),
                           Icon(Icons.tune,
                               size: 13,
                               color:

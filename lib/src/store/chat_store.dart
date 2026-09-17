@@ -9,6 +9,7 @@ import '../gateway/config.dart';
 import '../gateway/http_service.dart';
 import '../gateway/native_oauth.dart';
 import '../gateway/oauth_flow.dart';
+import '../models/context_usage.dart';
 import '../models/goal_status.dart';
 import '../models/models.dart';
 import '../notifications/notifier.dart';
@@ -221,6 +222,46 @@ class ChatStore extends ChangeNotifier {
 
   final StreamController<String> _notices =
       StreamController<String>.broadcast(sync: true);
+
+  /// Current context-window occupancy for the active session, as reported by
+  /// the gateway's usage payload. Stays [ContextUsage.unknown] until the
+  /// gateway reports a real reading, so the app bar shows nothing rather than
+  /// a fabricated 0%.
+  ContextUsage _context = ContextUsage.unknown;
+  ContextUsage get contextUsage => _context;
+
+  /// Compact app-bar label (`24.5k/128k`), or null when unknown.
+  String? get contextLabel => _context.label;
+
+  /// The gateway reports usage in two shapes: nested under `usage` on
+  /// `session.info` and `message.complete`, and flat on a `session.usage`
+  /// reply or event. Accept either.
+  static ContextUsage _usageFrom(Map<String, dynamic> payload) {
+    final nested = payload['usage'];
+    if (nested is Map) return ContextUsage.fromUsage(nested);
+    return ContextUsage.fromUsage(payload);
+  }
+
+  /// Pull the authoritative usage once per (re)attach, so the readout is live
+  /// before the first turn of a reopened conversation ends. Best-effort: the
+  /// push sources (session.info, message.complete) cover a gateway that does
+  /// not expose the request.
+  Future<void> _refreshContextUsage() async {
+    final sid = _activeSessionId;
+    if (sid == null || sid.isEmpty) return;
+    if (_client.state != GwConnectionState.open) return;
+    try {
+      final res = await _client.request('session.usage', {'session_id': sid});
+      if (_disposed || _activeSessionId != sid) return;
+      final next = ContextUsage.fromUsage(res);
+      if (next != _context) {
+        _context = next;
+        _notify();
+      }
+    } catch (_) {
+      // Best-effort; the event sources fill this in on the next turn.
+    }
+  }
 
   /// Transient, user-facing FAILURE notices.
   ///
@@ -1045,6 +1086,12 @@ class ChatStore extends ChangeNotifier {
         break;
       case 'message.complete':
         if (isActive) {
+          // The turn payload carries the authoritative usage, including the
+          // current context occupancy when the engine reports one.
+          final nextContext = _usageFrom(ev.payload);
+          if (nextContext != _context) {
+            _context = nextContext;
+          }
           final m = _messages.isEmpty ? null : _messages.last;
           if (m != null && m.role == 'assistant') {
             if (ev.text.isNotEmpty) m.setText(ev.text);
@@ -1192,6 +1239,10 @@ class ChatStore extends ChangeNotifier {
       case 'session.info':
       case 'session.usage':
         if (sid == _activeSessionId) {
+          final nextContext = _usageFrom(ev.payload);
+          if (nextContext != _context) {
+            _context = nextContext;
+          }
           final model = ev.payload['model'] as String?;
           if (model != null && model.isNotEmpty) {
             setLiveModel(model,
@@ -1617,6 +1668,7 @@ class ChatStore extends ChangeNotifier {
         // session's (it may carry its own active goal).
         clearGoal();
         unawaited(refreshGoal());
+        unawaited(_refreshContextUsage());
         notifyListeners();
       }
     }
@@ -2044,6 +2096,8 @@ class ChatStore extends ChangeNotifier {
     _activeSessionSeenLive = false;
     _lastGatewayStatus = '';
     _compacting = false;
+    // Context occupancy is per conversation.
+    _context = ContextUsage.unknown;
     // A parked clarify/approval belongs to the OUTGOING session.
     _clarifyAnswers.clear();
     // Reasoning/fast are SESSION-scoped: a different conversation may have a

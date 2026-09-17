@@ -1,0 +1,51 @@
+# F-Droid build metadata for Talaria.
+#
+# This is the file submitted to https://gitlab.com/fdroid/fdroiddata as
+# `metadata/com.talaria.talaria.yml`. F-Droid builds every app from source in a
+# clean environment and signs the result with its own key, so the debug signing
+# key used for the APKs on this repository's Releases page is irrelevant here.
+#
+# Field reference: https://f-droid.org/docs/Build_Metadata_Reference/
+# The build steps follow the pattern used by other Flutter apps in fdroiddata
+# (see `metadata/app.alextran.immich.yml`), which clone the Flutter SDK through
+# a srclib and drive `flutter build apk --release` directly.
+#
+# Keep versionName/versionCode/commit in step with the tag that is being built:
+# they must match the APK's own versionName/versionCode exactly.
+
+Categories:
+  - Internet
+  - Development
+
+License: MIT
+AuthorName: omgitsgela
+WebSite: https://github.com/omgitsgela/talaria
+SourceCode: https://github.com/omgitsgela/talaria
+IssueTracker: https://github.com/omgitsgela/talaria/issues
+Changelog: https://github.com/omgitsgela/talaria/releases
+
+AutoName: Talaria
+
+RepoType: git
+Repo: https://github.com/omgitsgela/talaria
+
+Builds:
+  - versionName: 1.1.1
+    versionCode: 26
+    commit: v1.1.1
+    output: build/app/outputs/flutter-apk/app-release.apk
+    srclibs:
+      - flutter@3.47.2
+    rm:
+      - test
+      - tool
+      - docs
+    build:
+      - $$flutter$$/bin/flutter config --no-analytics
+      - $$flutter$$/bin/flutter pub get
+      - $$flutter$$/bin/flutter build apk --release
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+CurrentVersion: 1.1.1
+CurrentVersionCode: 26

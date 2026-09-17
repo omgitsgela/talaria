@@ -4,7 +4,7 @@ publish_to: 'none'
 # Version convention (2026-09-11 round): major.minor = feature rounds;
 # +code = every APK build, bumped monotonically. lib/src/app_version.dart
 # mirrors these values for the UI — keep the two in lockstep.
-version: 1.1.0+25
+version: 1.1.1+26
 
 environment:
   sdk: '>=3.4.0 <4.0.0'
