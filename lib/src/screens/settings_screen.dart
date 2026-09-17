@@ -1,6 +1,11 @@
 import 'dart:async';
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+import '../diagnostics/error_report.dart';
 
 import '../app_version.dart';
 import '../models/models.dart';
@@ -148,9 +153,106 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 const SizedBox(height: 12),
                 _DisplayCard(),
                 const SizedBox(height: 12),
+                _DiagnosticsCard(store: store),
+                const SizedBox(height: 12),
                 _AboutCard(),
               ],
             ),
+    );
+  }
+}
+
+/// Bug-reporting support: a copyable bundle of facts about this install, plus
+/// what the bundle contains and where to file it.
+///
+/// The capture itself lives in [ErrorReport] and is installed in EVERY build,
+/// so someone running a released APK can hand back the details of a crash we
+/// cannot reproduce. Paired with the README's "Reporting a bug" section.
+class _DiagnosticsCard extends StatefulWidget {
+  const _DiagnosticsCard({required this.store});
+  final ChatStore store;
+
+  @override
+  State<_DiagnosticsCard> createState() => _DiagnosticsCardState();
+}
+
+class _DiagnosticsCardState extends State<_DiagnosticsCard> {
+  static const _issueTracker = 'https://github.com/omgitsgela/talaria/issues';
+  bool _copied = false;
+
+  /// Host only. The token and the full URL are never included.
+  String get _host {
+    final u = Uri.tryParse(widget.store.config.baseUrl);
+    return (u == null || u.host.isEmpty) ? widget.store.config.url : u.host;
+  }
+
+  Map<String, String> get _facts => {
+        'app': kAppVersionLabel,
+        'platform': Platform.operatingSystem,
+        'platform version': Platform.operatingSystemVersion,
+        'gateway host': _host,
+        'conversation open':
+            widget.store.activeStoredSessionId == null ? 'no' : 'yes',
+        'context usage': widget.store.contextUsage.label ?? 'not reported',
+      };
+
+  Future<void> _copyReport() async {
+    final ok = await ErrorReport.copy(ErrorReport.bugReport(_facts));
+    if (!mounted) return;
+    setState(() => _copied = ok);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(ok
+            ? 'Bug report copied. Paste it into the issue.'
+            : 'Could not copy the report'),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    return _SectionCard(
+      title: 'Diagnostics',
+      icon: Icons.bug_report_outlined,
+      child: Padding(
+        padding: const EdgeInsets.only(top: 4, bottom: 4),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Something misbehaving? Copy a report and paste it into an issue.',
+              style: theme.textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'It includes the app version, your platform, the gateway host '
+              'and the most recent error. Your gateway token is never '
+              'included. An error capture can quote text from the screen, so '
+              'skim it before you post.',
+              style: theme.textTheme.bodySmall?.copyWith(color: muted),
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                FilledButton.tonalIcon(
+                  onPressed: _copyReport,
+                  icon: Icon(_copied ? Icons.check : Icons.copy, size: 16),
+                  label: Text(_copied ? 'Copied' : 'Copy bug report'),
+                ),
+                const SizedBox(width: 8),
+                TextButton.icon(
+                  onPressed: () => launchUrl(Uri.parse(_issueTracker),
+                      mode: LaunchMode.externalApplication),
+                  icon: const Icon(Icons.open_in_new, size: 16),
+                  label: const Text('Open issues'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

@@ -119,17 +119,25 @@ class ChatStore extends ChangeNotifier {
   /// Test seam: the runtime id currently trusted as live, if any.
   String? get verifiedLiveSessionIdForTest => _verifiedLiveSessionId;
 
-  /// True while the transcript of the active conversation is still expected from
-  /// the gateway and nothing is on screen yet: a resume or history load in
-  /// flight, or a deferred history pull armed for an empty transcript (see
-  /// [_sessRefreshPending]).
+  /// True while the transcript of the active conversation is genuinely in
+  /// flight and nothing is on screen yet: a resume is running, or a
+  /// `session.history` read is.
   ///
   /// The transcript view uses this to show a loading state instead of the
-  /// "new conversation" empty state. A long conversation can take a moment to
-  /// load, and falling back to "Ask Hermes anything" reads as though the
-  /// conversation, and possibly the whole roster, had been lost.
+  /// "new conversation" empty state, because a long conversation can take a
+  /// moment to load and "Ask Hermes anything" reads as though the conversation,
+  /// and possibly the whole roster, had been lost.
+  ///
+  /// It deliberately does NOT consult [_sessRefreshPending]. That flag is a
+  /// sticky INTENT ("a read is due"), armed by every `sessions.changed`
+  /// broadcast, including ones that arrive with no conversation open — where
+  /// [_scheduleSessionRefresh] correctly refuses to act on it. Treating intent
+  /// as activity left the app spinning on "Loading conversation…" forever after
+  /// a cold start (reported: force-close and reopen). Only in-flight work
+  /// counts, and both flags below are cleared in a `finally`, so the state
+  /// cannot outlive the request that produced it.
   bool get awaitingTranscript =>
-      _messages.isEmpty && (_loadingSession || _sessRefreshPending);
+      _messages.isEmpty && (_loadingSession || _sessRefreshInFlight);
   String? _activeStoredSessionId;
   String? get activeStoredSessionId => _activeStoredSessionId;
   String? _activeSessionId;

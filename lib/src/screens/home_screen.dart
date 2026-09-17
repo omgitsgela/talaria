@@ -1441,6 +1441,47 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
+/// Empty result for the roster filter. Always paired with the search field
+/// above it (which is rendered outside the list) plus a way back to the full
+/// list, so a typo cannot strand the user on an empty screen.
+class _NoConversationMatches extends StatelessWidget {
+  const _NoConversationMatches({required this.query, required this.onClear});
+
+  final String query;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.search_off, size: 32, color: muted.withValues(alpha: 0.7)),
+            const SizedBox(height: 10),
+            Text('No conversations match “$query”.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(color: muted)),
+            const SizedBox(height: 4),
+            Text('Titles and previews are searched.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall?.copyWith(color: muted)),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: onClear,
+              icon: const Icon(Icons.close, size: 16),
+              label: const Text('Clear search'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// A persistent, long-horizon status bar for the active session's GOAL.
 ///
 /// A `/goal <text>` goal survives many turns, so — unlike the transient turn
@@ -2273,6 +2314,35 @@ class _SessionsSheetState extends State<SessionsSheet> {
   void initState() {
     super.initState();
     _loadPins();
+    _search.addListener(_onSearch);
+  }
+
+  /// Roster filter. Matches the title AND the preview: the gateway's titles are
+  /// often auto-generated, so the preview is usually what someone actually
+  /// remembers about an old conversation.
+  final _search = TextEditingController();
+  String _query = '';
+
+  void _onSearch() {
+    final q = _search.text.trim();
+    if (q != _query) setState(() => _query = q);
+  }
+
+  List<SessionRow> _filtered(List<SessionRow> all) {
+    final q = _query.toLowerCase();
+    if (q.isEmpty) return all;
+    return all
+        .where((s) =>
+            s.title.toLowerCase().contains(q) ||
+            s.preview.toLowerCase().contains(q))
+        .toList(growable: false);
+  }
+
+  @override
+  void dispose() {
+    _search.removeListener(_onSearch);
+    _search.dispose();
+    super.dispose();
   }
 
   /// Hydrate the store's in-memory pinned set from prefs. Best-effort: a
@@ -2304,6 +2374,7 @@ class _SessionsSheetState extends State<SessionsSheet> {
       store: store,
       builder: (context, store) {
         final empty = store.sessions.isEmpty;
+        final matches = _filtered(store.sessions);
         return Scaffold(
           backgroundColor: theme.scaffoldBackgroundColor,
           appBar: AppBar(
@@ -2321,20 +2392,66 @@ class _SessionsSheetState extends State<SessionsSheet> {
           ),
           body: empty
               ? const Center(child: Text('No conversations yet.'))
-              : ListView(
-                  padding: const EdgeInsets.fromLTRB(8, 4, 8, 12),
+              : Column(
                   children: [
-                    for (final seg in store.segmentedSessions(store.sessions))
-                      ...[
-                        // Section header. The pinned group gets a distinct
-                        // "Pinned" header with a pin glyph; time groups get
-                        // their bucket label (Today / Yesterday / …).
-                        _SectionHeader(
-                          label: seg.label.isEmpty ? 'Pinned' : seg.label,
-                          pinned: seg.label.isEmpty,
+                    // The search field sits OUTSIDE the list, so it survives an
+                    // empty result. A filter that removes the control you need
+                    // to undo the filter is a dead end (see the model picker).
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 2),
+                      child: TextField(
+                        controller: _search,
+                        minLines: 1,
+                        maxLines: 1,
+                        textInputAction: TextInputAction.search,
+                        decoration: InputDecoration(
+                          hintText: 'Search conversations…',
+                          prefixIcon: const Icon(Icons.search, size: 18),
+                          suffixIcon: _query.isEmpty
+                              ? null
+                              : IconButton(
+                                  icon: const Icon(Icons.close, size: 18),
+                                  tooltip: 'Clear search',
+                                  onPressed: _search.clear,
+                                ),
+                          isDense: true,
+                          filled: true,
+                          fillColor: theme.colorScheme.surfaceContainerHighest,
+                          contentPadding:
+                              const EdgeInsets.symmetric(vertical: 10),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide.none,
+                          ),
                         ),
-                        for (final s in seg.rows) _buildTile(context, s),
-                      ],
+                      ),
+                    ),
+                    Expanded(
+                      child: matches.isEmpty
+                          ? _NoConversationMatches(
+                              query: _query, onClear: _search.clear)
+                          : ListView(
+                              padding: const EdgeInsets.fromLTRB(8, 4, 8, 12),
+                              children: [
+                                for (final seg
+                                    in store.segmentedSessions(matches))
+                                  ...[
+                                    // Section header. The pinned group gets a
+                                    // distinct "Pinned" header with a pin
+                                    // glyph; time groups get their bucket label
+                                    // (Today / Yesterday / …).
+                                    _SectionHeader(
+                                      label: seg.label.isEmpty
+                                          ? 'Pinned'
+                                          : seg.label,
+                                      pinned: seg.label.isEmpty,
+                                    ),
+                                    for (final s in seg.rows)
+                                      _buildTile(context, s),
+                                  ],
+                              ],
+                            ),
+                    ),
                   ],
                 ),
         );

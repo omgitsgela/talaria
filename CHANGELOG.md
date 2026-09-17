@@ -3,6 +3,17 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.1.3
+
+### build 28
+- A conversation can be searched from the conversation list. The filter matches titles and previews
+  as you type, keeps the search box visible when nothing matches, and offers Clear search.
+- Settings has a Diagnostics section that copies a bug report: app version, platform, gateway host,
+  and the most recent error with its stack trace. Never the gateway token. The same report is offered
+  in place when a screen hits an error, and the report panel now works in released builds, not only
+  debug ones, so a bug can be reported without installing a debug APK.
+- Fixed the app getting stuck on "Loading conversation…" after a force close and reopen.
+
 ## 1.1.2
 
 ### build 27

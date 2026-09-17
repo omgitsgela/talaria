@@ -13,8 +13,11 @@ import 'package:flutter/services.dart';
 /// output alongside it (including GlobalKey reparenting traces), and renders
 /// the report in a panel with a copy button.
 ///
-/// Debug-only: [install] no-ops unless `kDebugMode`, and the release path
-/// keeps the framework defaults.
+/// Installed in EVERY build, not just debug: the whole point is that a user on
+/// a released APK can hand back a report for a crash we cannot reproduce. The
+/// GlobalKey lifecycle tracing stays debug-only (it is a foundation debug
+/// variable and produces a lot of noise), but the capture, the panel and the
+/// [bugReport] bundle are always available.
 class ErrorReport {
   ErrorReport._();
 
@@ -39,12 +42,12 @@ class ErrorReport {
   /// Route framework errors into [last] and replace the un-copyable red screen
   /// with [ErrorReportPanel]. Safe to call once from `main()`.
   static void install() {
-    if (!kDebugMode) return;
-
     // GlobalKey tree surgery is the known trigger for the element/render-tree
     // assertions seen on device; record its lifecycle lines in the report so
-    // the next occurrence names the offending key.
-    debugPrintGlobalKeyedWidgetLifecycle = true;
+    // the next occurrence names the offending key. Debug only: in release the
+    // framework never reads this variable (its readers are asserts), and the
+    // test framework asserts that foundation debug vars are left alone.
+    if (kDebugMode) debugPrintGlobalKeyedWidgetLifecycle = true;
 
     if (!_printWrapped) {
       _printWrapped = true;
@@ -95,6 +98,32 @@ class ErrorReport {
         ..writeln()
         ..writeln('--- recent log (${_log.length} lines) ---')
         ..writeln(_log.join('\n'));
+    }
+    return b.toString();
+  }
+
+  /// A paste-able bundle of facts about this install, for a bug report.
+  ///
+  /// [facts] are supplied by the caller (the Settings screen already has the
+  /// app version, connection state and gateway host). Deliberately contains no
+  /// conversation content of its own: the embedded framework error report is
+  /// the only part that can quote on-screen text, and the UI says so.
+  static String bugReport(Map<String, String> facts) {
+    final b = StringBuffer()
+      ..writeln('=== Talaria bug report ===')
+      ..writeln('generated: ${DateTime.now().toIso8601String()}')
+      ..writeln();
+    for (final entry in facts.entries) {
+      b.writeln('${entry.key}: ${entry.value}');
+    }
+    final captured = last.value;
+    b
+      ..writeln()
+      ..writeln('--- last error capture ---');
+    if (captured == null || captured.isEmpty) {
+      b.writeln('none captured in this session');
+    } else {
+      b.write(captured);
     }
     return b.toString();
   }
