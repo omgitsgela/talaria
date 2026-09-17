@@ -9,11 +9,15 @@
 # irrelevant here.
 #
 # Field reference: https://f-droid.org/docs/Build_Metadata_Reference/
-# The build steps follow the pattern used by other Flutter apps in fdroiddata
-# (see `metadata/app.alextran.immich.yml`), which clone the Flutter SDK through
-# a srclib and drive `flutter build apk --release` directly. The policy
-# explicitly permits the Android SDK, Flutter SDK and Hermes to use their
-# official prebuilt binaries until Debian packaging exists.
+# The build steps follow the convention used by other Flutter apps in
+# fdroiddata (see `metadata/app.alextran.immich.yml`): the `flutter` srclib is
+# cloned at its `stable` branch, and a prebuild step checks out the exact SDK
+# version this project declares in pubspec.yaml. That indirection is deliberate:
+# the SDK version lives in the project it applies to, so a version bump does not
+# need a metadata change, and it is why pubspec.yaml pins Flutter exactly
+# (`flutter: 3.47.2`) rather than using a `>=` range their tooling cannot read.
+# The policy explicitly permits the Android SDK, Flutter SDK and Hermes to use
+# their official prebuilt binaries until Debian packaging exists.
 #
 # Store listing text, screenshots and the per-version changelog come from
 # `fastlane/metadata/android/en-US/` in this repository, so no `Description`
@@ -38,16 +42,22 @@ RepoType: git
 Repo: https://github.com/omgitsgela/talaria
 
 Builds:
-  - versionName: 1.2.1
-    versionCode: 30
-    commit: v1.2.1
+  - versionName: 1.2.2
+    versionCode: 31
+    commit: v1.2.2
     output: build/app/outputs/flutter-apk/app-release.apk
     srclibs:
-      - flutter@3.47.2
+      # `stable` is the branch their builder clones; the exact SDK version is
+      # checked out in prebuild, from pubspec.yaml.
+      - flutter@stable
     rm:
       - test
       - tool
       - docs
+    prebuild:
+      - export flutterVersion=$(sed -n -E "s/.*flutter:\s([0-9.]+)/\1/p" pubspec.yaml)
+      - '[[ $flutterVersion ]]'
+      - git -C $$flutter$$ checkout -f $flutterVersion
     build:
       - $$flutter$$/bin/flutter config --no-analytics
       - $$flutter$$/bin/flutter pub get
@@ -55,5 +65,8 @@ Builds:
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
-CurrentVersion: 1.2.1
-CurrentVersionCode: 30
+# Reads the version out of pubspec.yaml at the tagged commit, so future releases
+# need no metadata edit either.
+UpdateCheckData: pubspec.yaml|version:\s.+\+(\d+)|.|version:\s(.+)\+
+CurrentVersion: 1.2.2
+CurrentVersionCode: 31

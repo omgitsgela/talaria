@@ -3,6 +3,15 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.2.2
+
+### build 31
+- No user-visible changes. This build exists to correct the packaging metadata that an F-Droid
+  submission depends on: Flutter is now pinned exactly (`flutter: 3.47.2`) rather than to the old
+  `>=3.22.0` range, which both understated what the project needs and could not be read by F-Droid's
+  build tooling, and the recipe now clones the Flutter SDK's stable branch and checks out the version
+  the project declares, which is the convention other Flutter apps in their repository follow.
+
 ## 1.2.1
 
 ### build 30

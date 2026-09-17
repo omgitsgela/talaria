@@ -4,11 +4,15 @@ publish_to: 'none'
 # Version convention (2026-09-11 round): major.minor = feature rounds;
 # +code = every APK build, bumped monotonically. lib/src/app_version.dart
 # mirrors these values for the UI — keep the two in lockstep.
-version: 1.2.1+30
+version: 1.2.2+31
 
 environment:
+  # Pinned exactly, and deliberately: the Android build templates, AGP/Kotlin
+  # versions and compileSdk in this project come from this Flutter release, and
+  # F-Droid's Flutter build recipe reads this line to decide which SDK to build
+  # with (their tooling expects the version first, with no `>=` in front).
   sdk: '>=3.4.0 <4.0.0'
-  flutter: '>=3.22.0'
+  flutter: 3.47.2
 
 dependencies:
   flutter:

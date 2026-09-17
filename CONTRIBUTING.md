@@ -5,7 +5,9 @@ want to use the app, the [README](README.md) is the place to start.
 
 ## Setting up
 
-- **Flutter 3.22 or newer** (developed and released with 3.47.2) with Dart 3.4+.
+- **Flutter 3.47.2**, pinned in `pubspec.yaml`, with Dart 3.13 or newer. The pin is deliberate: the
+  Android build templates, AGP and Kotlin versions and the compile SDK all come from this Flutter
+  release, and F-Droid's build recipe reads that line to choose the SDK to build with.
 - **A working Android toolchain**: the Android SDK, and **JDK 21 from an open implementation**
   (OpenJDK, for example Eclipse Temurin 21, which is what this project builds with). Do not build
   with Oracle's JDK: F-Droid requires a fully free toolchain and rejects proprietary build tools

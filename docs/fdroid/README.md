@@ -15,6 +15,13 @@ updated by, one from the GitHub Releases page.
 Store listing text, screenshots and the per-version changelog live in `fastlane/metadata/android/en-US/`,
 so the recipe needs no `Description` field.
 
+**How the Flutter version is pinned.** The recipe clones the `flutter` srclib at its `stable` branch
+and a `prebuild` step checks out the exact SDK version declared in `pubspec.yaml`. That is the
+convention other Flutter apps in fdroiddata use, and it is why `pubspec.yaml` pins Flutter exactly
+(`flutter: 3.47.2`) instead of using a `>=` range: their tooling reads that line with
+`sed -n -E "s/.*flutter:\s([0-9.]+)/\1/p"`, which finds nothing in `flutter: '>=3.22.0'`. The same
+file also supplies the version code, so a release needs no metadata edit at all.
+
 ## Compliance status against the inclusion policy
 
 Checked against <https://f-droid.org/docs/Inclusion_Policy/> and
@@ -61,11 +68,11 @@ to carry a valid licence or be public domain.
 ## Prerequisites still to satisfy
 
 - **The repository has to be public** before their build can reach the source.
-- **`srclibs: flutter@3.47.2`** must be usable by their builder, which clones
-  `github.com/flutter/flutter` at that tag and drives `bin/flutter`. Flutter fetches engine
-  artifacts and pub packages on first run, which depends on their build containers' network access.
-  If the pinned version is not usable there, either adjust the pin or add the srclib in the same
-  merge request. This can only be settled by an actual F-Droid build.
+- **Their builder must be able to fetch what Flutter needs**: the SDK is cloned from
+  `github.com/flutter/flutter` and its engine artifacts plus pub packages are downloaded on first
+  run, which depends on the network access their build containers grant. The version itself is no
+  longer a guess, since it is read from `pubspec.yaml`, but this can only be settled by an actual
+  F-Droid build.
 - **A crisp listing icon** is optional: F-Droid uses the APK's launcher icon, which tops out at
   192x192 here. Supplying a 512x512 PNG at `fastlane/metadata/android/en-US/images/icon.png` would
   look sharper in their client.
@@ -75,7 +82,7 @@ to carry a valid licence or be public domain.
 ```sh
 pip install fdroidserver
 fdroid lint com.ionfyre.talaria.yml
-fdroid build --verbose com.ionfyre.talaria -v 1.2.1
+fdroid build --verbose com.ionfyre.talaria -v 1.2.2
 ```
 
 `fdroid build` needs the Flutter SDK on `PATH` and enough disk for a cold Flutter build.
