@@ -3,6 +3,23 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.2.6
+
+### build 35
+- **Reading earlier no longer jitters.** With the reader scrolled away from the newest message,
+  every streamed character still re-laid-out the transcript: the newest end grew, the content
+  shifted, and the read-position correction moved it back, two phases per character. Those
+  characters are off the bottom of the viewport while you read, so they are no longer painted
+  per character at all: the app accumulates them and repaints in one frame when you return to
+  the newest end. New messages, tool activity and the end of a turn still appear immediately,
+  so the transcript is never frozen. (#1)
+- **An expanded reasoning trace stays open while new content streams in.** A trace you had open
+  collapsed by itself as soon as a new message started. The transcript is a reversed list, so
+  appending a message moves every row's slot, and the rows were being re-created rather than
+  moved, which discarded their state (the trace's expansion lives in that state). The rows now
+  keep their identity across a shift, and their layout shape is constant rather than changing
+  around the read divider. (#9)
+
 ## 1.2.5
 
 ### build 34

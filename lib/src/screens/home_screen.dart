@@ -44,6 +44,43 @@ class _HomeScreenState extends State<HomeScreen> {
   /// read upward we drop a "where you left off" divider and show a jump arrow.
   bool _stickToBottom = true;
 
+  /// Set the follow latch AND tell the store whether the reader is away from the
+  /// newest end.
+  ///
+  /// The store defers per-character content updates while the reader is away
+  /// (see `ChatStore.setReaderAway`): a streamed character that lands off the
+  /// bottom of the viewport does not need to be painted, and re-laying out the
+  /// transcript for every one of them is what drifts the content under the
+  /// reader and jitters it against the read-position hold. Structural events (a
+  /// new message, a tool starting, the turn ending) still repaint immediately.
+  void _setStick(bool stick) {
+    _stickToBottom = stick;
+    _trackedStore?.setReaderAway(!stick);
+  }
+
+  /// Row keys carry the CHRONOLOGICAL message index, so a row stays identifiable
+  /// as the list grows.
+  static const String _rowKey = 'msg-';
+
+  /// Map a transcript row's [key] back to its CURRENT builder index, or `null`
+  /// when the row is no longer in the list.
+  ///
+  /// The transcript is a REVERSED list whose builder index depends on the total
+  /// count (`v = count - 1 - i`), so appending a message moves every row's slot.
+  /// `ListView` locates children BY INDEX, so without this the sliver mismatches
+  /// keys at every shifted slot and RE-CREATES those rows, losing their State:
+  /// an expanded reasoning trace collapsed the instant new content streamed in
+  /// while the user was reading it. Keys make a row identifiable; this is what
+  /// lets the sliver find it again at its new index.
+  int? _rowIndexFor(Key key, int count) {
+    if (key is! ValueKey<String>) return null;
+    final id = key.value;
+    if (!id.startsWith(_rowKey)) return null;
+    final v = int.tryParse(id.substring(_rowKey.length));
+    if (v == null || v < 0 || v >= count) return null;
+    return count - 1 - v;
+  }
+
   /// Max scroll extent seen while the user is READING (not following the
   /// bottom). Used to compensate for the reversed-list geometry: when the
   /// newest message grows by Δ (streaming text appended at offset 0), the
@@ -162,7 +199,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // read that clamp as "the user wants the bottom". Re-arming happens on a
     // deliberate settle at the newest end (see [_onScrollEnd]).
     if (dragging) {
-      _stickToBottom = false;
+      _setStick(false);
     }
     // Streaming-compensation (read-hold) arming: capture the extent ONCE, the
     // moment the user moves up from the newest end. From then on only the
@@ -196,7 +233,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!_scroll.hasClients) return;
     final pos = _scroll.position;
     if (pos.pixels > 48) return;
-    _stickToBottom = true;
+    _setStick(true);
     _pinnedMaxExtent = null;
     _updateArrow();
   }
@@ -208,7 +245,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (sid != _lastSessionId) {
       // Conversation switch: jump to the most recent message.
       _lastSessionId = sid;
-      _stickToBottom = true;
+      _setStick(true);
       _pinnedMaxExtent = null;
       _lastReadIndex.remove(sid); // fresh open — no stale divider
       _scheduleOpenJump(s);
@@ -299,7 +336,7 @@ class _HomeScreenState extends State<HomeScreen> {
       // drag, which is how "scroll up while it streams" was impossible: every
       // streamed character reset the offset to 0 and re-armed the follow.
       if (pos.userScrollDirection != ScrollDirection.idle) {
-        _stickToBottom = false;
+        _setStick(false);
         _pinnedMaxExtent ??= pos.maxScrollExtent;
         _updateArrow();
         return;
@@ -307,7 +344,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (pos.pixels != 0) {
         pos.jumpTo(0);
       }
-      _stickToBottom = true;
+      _setStick(true);
       _pinnedMaxExtent = null;
       _updateArrow();
     });
@@ -331,7 +368,7 @@ class _HomeScreenState extends State<HomeScreen> {
       } else if (!s.loadingSession) {
         // Fresh conversation: nothing to scroll to; consume the flag.
         s.consumeJumpToBottom();
-        _stickToBottom = true;
+        _setStick(true);
         _updateArrow();
         if (mounted) setState(() => _showJumpArrow = false);
       }
@@ -343,7 +380,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!_scroll.hasClients) return;
     // Newest = offset 0 in the reversed list.
     if (_scroll.position.pixels != 0) _scroll.jumpTo(0);
-    _stickToBottom = true;
+    _setStick(true);
     _pinnedMaxExtent = null;
     final sid = store.activeSessionId;
     if (sid != null) _lastReadIndex[sid] = store.messages.length - 1;
@@ -381,7 +418,7 @@ class _HomeScreenState extends State<HomeScreen> {
       // round-20 behaviour, so collapsing a trace at the newest end still hides
       // the arrow and resumes following.
       if (!store.streaming) {
-        _stickToBottom = atBottom;
+        _setStick(atBottom);
         _pinnedMaxExtent = atBottom ? null : pos.maxScrollExtent;
       }
       _updateArrow();
@@ -637,6 +674,19 @@ class _HomeScreenState extends State<HomeScreen> {
                                 // in its original message-index space.
                                 reverse: true,
                                 itemCount: messages.length,
+                                // Appending a message shifts EVERY builder index
+                                // (`i` maps to `v = count - 1 - i`), so the sliver
+                                // cannot find a row at the index it last built it
+                                // at. Keys alone do NOT save a lazy sliver: it
+                                // matches children per index, so every shifted slot
+                                // mismatches and the row is RE-CREATED, dropping
+                                // its State - which is how an expanded reasoning
+                                // trace collapsed the moment new content streamed
+                                // in while the user was reading it. This callback
+                                // maps a row's key back to its CURRENT slot so the
+                                // element is re-used in place.
+                                findChildIndexCallback: (key) =>
+                                    _rowIndexFor(key, messages.length),
                                 itemBuilder: (context, i) {
                                   final count = messages.length;
                                   final v = count - 1 - i;
@@ -662,7 +712,6 @@ class _HomeScreenState extends State<HomeScreen> {
                                   // rebuild; the snapshot is stable until the
                                   // message's revision actually moves.
                                   final msg = MessageBubble(
-                                    key: ValueKey('msg-$v'),
                                     message: messages[v].copy(),
                                     isUser: messages[v].role == 'user',
                                   );
@@ -678,26 +727,47 @@ class _HomeScreenState extends State<HomeScreen> {
                                   // Order above the message: time pill (its
                                   // chronological position) first, then the
                                   // "you were here" divider, then the message.
-                                  final Widget? pill = breakLabel == null
-                                      ? null
+                                  // SHAPE IS CONSTANT, and that is the point.
+                                  //
+                                  // This used to wrap the row in extra widgets
+                                  // only while it was the divider row or the
+                                  // first of a time bucket, so the wrapper
+                                  // APPEARED and DISAPPEARED as the divider
+                                  // moved - and the divider moves both as the
+                                  // reader scrolls and as content streams in.
+                                  // Changing the nesting re-creates that row's
+                                  // element, and re-creating an element drops
+                                  // its State: an expanded reasoning trace
+                                  // silently COLLAPSED while the user was
+                                  // reading it. Fixed slots keep the child count
+                                  // and the nesting constant, so `msg` is
+                                  // updated in place and keeps its state.
+                                  // `stretch` gives the children the same full
+                                  // width the bare row used to receive.
+                                  final dividerSlot = v == dividerIndex
+                                      ? const _ReadDivider()
+                                      : const SizedBox.shrink();
+                                  final pillSlot = breakLabel == null
+                                      ? const SizedBox.shrink()
                                       : _TimeBreakPill(label: breakLabel);
-                                  Widget row = msg;
-                                  if (v == dividerIndex) {
-                                    row = Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [_ReadDivider(), msg],
-                                    );
-                                  }
-                                  if (pill != null) {
-                                    row = Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        pill,
-                                        row,
-                                      ],
-                                    );
-                                  }
-                                  return row;
+                                  // The KEY belongs on the widget the builder
+                                  // RETURNS. A sliver matches children by the key
+                                  // of that direct child (it is wrapped in a
+                                  // salted KeyedSubtree), so a key buried inside
+                                  // a wrapper is invisible to it: the rows then
+                                  // have no identity to match on, every index
+                                  // shift re-creates the whole visible list, and
+                                  // the per-row State goes with it (a trace
+                                  // collapsing while it is read). With the key
+                                  // out here, `_rowIndexFor` maps the row to its
+                                  // new slot and the element is re-used in place.
+                                  return Column(
+                                    key: ValueKey('$_rowKey$v'),
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [pillSlot, dividerSlot, msg],
+                                  );
                                 },
                               ),
                             ),

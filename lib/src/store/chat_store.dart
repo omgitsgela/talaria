@@ -1378,8 +1378,46 @@ class ChatStore extends ChangeNotifier {
       default:
         break;
     }
-    if (isActive) notifyListeners();
+    // Deferred only for the per-character content kinds while the reader is away
+    // from the newest end (see _deferContentUpdate). The model is already
+    // updated; setReaderAway(false) paints it when they come back.
+    if (isActive && !_deferContentUpdate(ev)) notifyListeners();
   }
+
+  /// True while the transcript is scrolled AWAY from the newest end. Owned by
+  /// the view (the follow latch's owner), read here to decide whether a
+  /// per-character content delta needs to reach the UI at all.
+  ///
+  /// Why defer: re-laying out the transcript for every streamed character is
+  /// what drags the content under a reader's eyes. Each delta grows the newest
+  /// end, the layout shifts, and the read-hold's post-layout compensation then
+  /// moves it back - two phases per character, which reads as an up/down jitter
+  /// on top of the drift. A reader who is away from the newest end does not need
+  /// those characters painted anyway: they are off the bottom of the viewport.
+  /// Clearing the flag notifies ONCE, rendering everything that accumulated.
+  bool _readerAway = false;
+  bool get readerAway => _readerAway;
+
+  void setReaderAway(bool away) {
+    if (away == _readerAway) return;
+    _readerAway = away;
+    // Coming back: paint the backlog this deferral accumulated.
+    if (!away && !_disposed) notifyListeners();
+  }
+
+  /// Kinds that arrive once PER CHARACTER (or per progress tick) while a turn
+  /// streams. Only these are deferred; everything structural - a new message, a
+  /// tool starting, a plan update, the turn ending - still repaints immediately,
+  /// so a reader is never left staring at a frozen transcript.
+  static const Set<String> _perCharacterKinds = {
+    'message.delta',
+    'thinking.delta',
+    'reasoning.delta',
+    'tool.progress',
+  };
+
+  bool _deferContentUpdate(GatewayEvent ev) =>
+      _readerAway && _streaming && _perCharacterKinds.contains(ev.type);
 
   GatewayEvent? _pendingRequest;
   GatewayEvent? get pendingRequest => _pendingRequest;

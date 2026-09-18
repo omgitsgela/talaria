@@ -1,0 +1,2 @@
+* Reading earlier in a conversation no longer jitters while a reply streams. New content is painted when you return to the newest message instead of shifting the view under you line by line.
+* A reasoning trace you have expanded no longer collapses by itself when a new message starts streaming in.

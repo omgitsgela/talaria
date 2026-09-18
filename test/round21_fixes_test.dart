@@ -107,17 +107,22 @@ void main() {
           reason: 'each visible row builds once when it inflates');
       expect(MessageBubble.buildCountFor(second), 1);
 
-      // A new turn starts: a FRESH tail row is prepended (count 4 -> 5),
-      // which moves every visible child slot and re-inflates the visible
-      // states ONCE (documented cost of no-keep-alive lists).
+      // A new turn starts: a FRESH tail row is prepended (count 4 -> 5), which
+      // moves every visible child slot in the reversed list. The rows keep their
+      // IDENTITY across that shift - the row key sits on the widget the builder
+      // RETURNS, and `findChildIndexCallback` tells the sliver where that row
+      // moved to - so the existing rows are re-used and their memo holds. No
+      // re-inflation, and no State loss: a trace the reader had expanded used to
+      // collapse right here.
       gw.push(GatewayEvent(type: 'message.start', sessionId: 'live-r21'));
       await tester.pump();
       final tail = store.messages.last;
       expect(tail, isNot(same(first)));
       expect(MessageBubble.buildCountFor(tail), 1);
-      expect(MessageBubble.buildCountFor(first), 2,
-          reason: 'a count change re-inflates visible rows once');
-      expect(MessageBubble.buildCountFor(second), 2);
+      expect(MessageBubble.buildCountFor(first), 1,
+          reason: 'a count change must NOT re-inflate a row that kept its '
+              'identity');
+      expect(MessageBubble.buildCountFor(second), 1);
 
       // Now STEADY streaming: two deltas into the tail, count unchanged.
       // The owner row rebuilds once per delta; the OTHER rows must not
@@ -128,9 +133,9 @@ void main() {
       expect(tail.text, isNotEmpty);
       expect(MessageBubble.buildCountFor(tail), 2,
           reason: 'the owner row rebuilds once per delta');
-      expect(MessageBubble.buildCountFor(first), 2,
+      expect(MessageBubble.buildCountFor(first), 1,
           reason: 'an untouched row must not rebuild on a foreign delta');
-      expect(MessageBubble.buildCountFor(second), 2,
+      expect(MessageBubble.buildCountFor(second), 1,
           reason: 'an untouched row must not rebuild on a foreign delta');
 
       gw.push(GatewayEvent(type: 'message.delta', sessionId: 'live-r21',
@@ -138,8 +143,8 @@ void main() {
       await tester.pump();
       await tester.pump(); // a second pump must not add phantom builds
       expect(MessageBubble.buildCountFor(tail), 3);
-      expect(MessageBubble.buildCountFor(first), 2);
-      expect(MessageBubble.buildCountFor(second), 2);
+      expect(MessageBubble.buildCountFor(first), 1);
+      expect(MessageBubble.buildCountFor(second), 1);
     });
 
     testWidgets('the streamed tail is still rendered live', (tester) async {
