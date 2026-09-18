@@ -1,0 +1,3 @@
+* /queue now queues: the command no longer lets the gateway redirect or interrupt the running turn, so the message runs after it as intended.
+* Compression now acknowledges when it starts, with the progress line still shown while it runs.
+* Scrolling while a reasoning trace streams is covered by a regression test.

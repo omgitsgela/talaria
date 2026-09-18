@@ -17,7 +17,11 @@ permissions:
 jobs:
   analyze-and-test:
     name: Analyze and test
-    runs-on: ubuntu-latest
+    # Pinned: `ubuntu-latest` migrates to Ubuntu 26 on 2026-10-19, which would
+    # change the runner OS under us with no code change. Pin the image so the
+    # toolchain and OS stay deterministic. Bump deliberately when we want the
+    # newer image (and re-verify the Flutter action against it).
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7

@@ -12,11 +12,11 @@
 ///   - +code        = every APK build, incremented monotonically.
 library;
 
-/// `major.minor.patch` — shown as "Talaria 1.2.3".
-const String kAppVersion = '1.2.3';
+/// `major.minor.patch` — shown as "Talaria 1.2.4".
+const String kAppVersion = '1.2.4';
 
 /// Monotonic build number (matches the pubspec `+N`).
-const int kAppBuildCode = 32;
+const int kAppBuildCode = 33;
 
 /// One-line tagline for the splash.
 const String kAppTagline = 'Your gateway, in your pocket';

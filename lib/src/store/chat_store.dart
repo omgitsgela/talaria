@@ -224,6 +224,30 @@ class ChatStore extends ChangeNotifier {
   String _statusLine = '';
   String get statusLine => _statusLine;
 
+  /// True while the gateway is rewriting this session's history for a
+  /// compression request. Armed when a request is accepted (or when the
+  /// gateway's own `compressing` status arrives) and disarmed on
+  /// `compressed`/`compacted`/`ready`. Guards the start acknowledgement so it
+  /// can fire at most once per compression.
+  bool _compressing = false;
+  bool get compressing => _compressing;
+
+  /// Tell the user a compression has STARTED. The finish toast already exists
+  /// (the `compressSession` result SnackBar), but the in-flight window was
+  /// silent: `session.compress` blocks until the rewrite completes, and the
+  /// gateway only streams a `compressing` status line when there are 4 or
+  /// more messages (which then appears only in the status pill, easy to miss).
+  /// [detail] is the gateway's own status text when we already have it.
+  void _announceCompressionStart({String? detail}) {
+    if (_compressing) return;
+    _compressing = true;
+    if (!_notices.isClosed) {
+      _notices.add(detail != null && detail.trim().isNotEmpty
+          ? detail.trim()
+          : 'Compressing conversation…');
+    }
+  }
+
   /// `status.update` kinds worth showing in the transcript's status pill.
   /// The gateway also relays the agent's internal narration as kind
   /// `lifecycle` ("Session is free; loading the latest transcript…",
@@ -1164,8 +1188,15 @@ class ChatStore extends ChangeNotifier {
           if (kind == 'compacting' || kind == 'compressing') {
             _compacting = true;
             _sessRefreshPending = true;
+            if (kind == 'compressing') {
+              // The gateway streams this only when 4+ messages are being
+              // rewritten. If the user's request already announced the start,
+              // the flag makes this a no-op instead of a second toast.
+              _announceCompressionStart(detail: ev.text);
+            }
           } else if (kind == 'compacted' || kind == 'compressed') {
             _compacting = false;
+            _compressing = false;
             _sessRefreshPending = true;
             _scheduleSessionRefresh();
           }
@@ -1990,9 +2021,15 @@ class ChatStore extends ChangeNotifier {
     }
     if (sid == null || sid.isEmpty) return null;
     try {
+      // Acknowledge BEFORE the request: session.compress blocks until the
+      // rewrite is done, so a notice fired afterwards would look like a
+      // second completion toast. The gateway's own `compressing` status
+      // (4+ messages) can no longer double-announce: _compressing is now set.
+      _announceCompressionStart();
       final res =
           await _client.request('session.compress', {'session_id': sid});
       final locked = res['lock_held'] == true;
+      _compressing = false;
       _statusLine = locked
           ? (res['message']?.toString() ?? 'Compression lock held')
           : 'Compressed';
@@ -2002,6 +2039,7 @@ class ChatStore extends ChangeNotifier {
           : 'Compressed';
     } catch (e) {
       final msg = _shortError(e);
+      _compressing = false;
       _statusLine = msg;
       if (!_disposed) notifyListeners();
       return msg;
@@ -2175,7 +2213,13 @@ class ChatStore extends ChangeNotifier {
   /// `session.resume` on the STORED id (server.py `_sess_nowait`). We re-attach
   /// silently and retry ONCE so a send after a background disconnect lands
   /// instead of failing. A second failure is surfaced.
-  Future<bool> send(String text) async {
+  /// Send [text] to the active session. When [asQueue] is set, the
+  /// `queued: true` flag is passed so the gateway FORCES queue mode even if
+  /// `display.busy_input_mode` is interrupt or steer: a "run after" message
+  /// (`/queue`) must never become a live correction of a running turn
+  /// (gateway `session_auto_continue._handle_busy_submit`). A plain mid-turn
+  /// send (no flag) keeps the session's busy mode, like the desktop.
+  Future<bool> send(String text, {bool asQueue = false}) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty && _pendingAttachments.isEmpty) return false;
     if (_client.state != GwConnectionState.open) {
@@ -2209,6 +2253,7 @@ class ChatStore extends ChangeNotifier {
         final res = await _client.request('prompt.submit', {
           'session_id': _activeSessionId,
           'text': fullText,
+          if (asQueue) 'queued': true,
         });
         // Remove only the snapshotted refs; refs added during submit survive.
         for (final ref in snapshot) {
@@ -2421,7 +2466,22 @@ class ChatStore extends ChangeNotifier {
         // Mid-turn is fine: a busy gateway busy-queues the prompt, and the
         // queued turn's events (message.start … message.complete) drive the
         // streaming UI exactly like a fresh send.
-        await send(msg);
+        //
+        // /queue (and /q) are stricter than a plain mid-turn send: the
+        // gateway's _cmd_queue returns the same `send` directive, but the
+        // message must RUN AFTER the current turn. queued: true forces queue
+        // mode, so display.busy_input_mode=interrupt/steer cannot redirect or
+        // steer it (session_auto_continue: "a 'run after' message must NEVER
+        // become a live correction"). Skill kickoffs follow the session's
+        // busy mode like plain sends.
+        final head = originalCommand
+            .trimLeft()
+            .split(RegExp(r'\s+'))
+            .first
+            .toLowerCase();
+        final isQueueDirective =
+            d.type == 'send' && (head == '/queue' || head == '/q');
+        await send(msg, asQueue: isQueueDirective);
         break;
       case 'prefill':
         final msg = d.message.trim();

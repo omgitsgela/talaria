@@ -3,6 +3,26 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.2.4
+
+### build 33
+- **`/queue` now actually queues.** The command submitted its message as a plain mid-turn
+  prompt, so the gateway applied the session's busy mode to it: with the default `interrupt`
+  mode the current turn could be redirected or even interrupted instead of the message running
+  after it. `/queue` and its `/q` alias now pass `queued: true`, which forces queue mode on the
+  gateway so a run-after message can never become a live correction of the running turn. Plain
+  mid-turn sends and skill kickoffs keep the session's busy mode, matching the desktop. (#2)
+- **Compression acknowledges when it starts.** Tapping *Compress context* was silent until the
+  result toast at the end, and the gateway's own progress line only appears for conversations of
+  four or more messages and was easy to miss. The app now shows a start notice the moment the
+  request is accepted, and the gateway's progress text still fills the status line while it
+  runs. (#3)
+- **Scrolling while a reasoning trace streams is now pinned in tests.** Build 32 already let a
+  live gesture win while a message streams; the reasoning path uses the same guard, and a
+  regression test now proves the trace case directly so it cannot regress. (#1)
+- CI pins `ubuntu-24.04` ahead of GitHub's October 19 migration of the `ubuntu-latest` label to
+  Ubuntu 26, so the runner image does not change under the project. (#5)
+
 ## 1.2.3
 
 ### build 32
