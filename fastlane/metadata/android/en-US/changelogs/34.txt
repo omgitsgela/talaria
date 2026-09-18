@@ -1,0 +1,1 @@
+* Scrolling up while a reply is streaming no longer snaps back to the newest message. The cause was a mid-stream change in content height that reset the scroll position and re-armed auto-scrolling; the view now stays where you put it while the reply grows below, and following resumes when you return to the bottom.

@@ -150,10 +150,20 @@ class _HomeScreenState extends State<HomeScreen> {
     // can ever accumulate past 48px and the reader can never get away from the
     // bottom. While the gesture lasts, the user is driving; settling back inside
     // the band (the events after the finger lifts) re-arms the follow.
-    final dragging =
-        _scroll.position.userScrollDirection != ScrollDirection.idle;
-    final atBottom = _scroll.position.pixels <= 48;
-    _stickToBottom = dragging ? false : atBottom;
+    final pos = _scroll.position;
+    final dragging = pos.userScrollDirection != ScrollDirection.idle;
+    final atBottom = pos.pixels <= 48;
+    // Only the USER may change the follow latch. A programmatic move - the
+    // read-hold's own adjustment, the open jump, a layout clamp - must never
+    // re-arm it from the resulting offset, because ANY path that lands the
+    // offset inside the near-bottom band would otherwise silently resume
+    // following. That is how a streamed trace pinned readers to the newest
+    // message: a mid-stream extent shrink clamped the offset to 0 and this line
+    // read that clamp as "the user wants the bottom". Re-arming happens on a
+    // deliberate settle at the newest end (see [_onScrollEnd]).
+    if (dragging) {
+      _stickToBottom = false;
+    }
     // Streaming-compensation (read-hold) arming: capture the extent ONCE, the
     // moment the user moves up from the newest end. From then on only the
     // content-change path updates the reference — re-reading it on every
@@ -163,12 +173,31 @@ class _HomeScreenState extends State<HomeScreen> {
     if (atBottom) {
       _pinnedMaxExtent = null;
     } else if (_pinnedMaxExtent == null) {
-      _pinnedMaxExtent = _scroll.position.maxScrollExtent;
+      _pinnedMaxExtent = pos.maxScrollExtent;
     }
     // Both helpers self-guard (only setState when their derived value changes),
     // so running them on every scroll tick is cheap and keeps the read divider
     // tracking as the user moves up/down, not just at the follow-threshold.
     _commitReadMarker();
+    _updateArrow();
+  }
+
+  /// A list that has come to REST at the newest end is following again.
+  ///
+  /// Re-arming from the offset alone is unsafe (see [_onScroll]): anything that
+  /// moves the offset programmatically - the read-hold's adjustment, a layout
+  /// clamp - would read as user intent, and a streamed reply then pins the
+  /// reader to the bottom. The deliberate "I am back at the live end" signal is
+  /// the END of a scroll: a drag, a fling, or the jump-to-latest button that
+  /// settles inside the near-bottom band. Horizontal inner scrollers (markdown
+  /// code blocks) are ignored.
+  void _onScrollEnd(ScrollEndNotification n) {
+    if (n.metrics.axis != Axis.vertical) return;
+    if (!_scroll.hasClients) return;
+    final pos = _scroll.position;
+    if (pos.pixels > 48) return;
+    _stickToBottom = true;
+    _pinnedMaxExtent = null;
     _updateArrow();
   }
 
@@ -235,6 +264,17 @@ class _HomeScreenState extends State<HomeScreen> {
       final delta = np.maxScrollExtent - ref;
       if (delta.abs() < 0.5) return;
       _pinnedMaxExtent = np.maxScrollExtent;
+      // A SHRINK is not something the newest end of a streaming reply does, and
+      // applying one is how a reader gets dragged to the newest message. The
+      // trace row is an `ExpansionTile` whose height changes as it animates,
+      // reflows or is collapsed, so mid-stream the extent can drop by hundreds
+      // of pixels: the negative delta lands `pixels + delta` on the 0 clamp,
+      // and the follow latch then re-arms OFF that clamped offset, after which
+      // every streamed character pins the view to the bottom. Re-baseline
+      // instead of compensating: the offset is anchored at the newest end, so
+      // older content shrinking above the viewport does not move what is on
+      // screen.
+      if (delta < 0 && store.streaming) return;
       final target = (np.pixels + delta).clamp(0.0, np.maxScrollExtent);
       if ((target - np.pixels).abs() > 0.5) {
         np.jumpTo(target);
@@ -335,14 +375,13 @@ class _HomeScreenState extends State<HomeScreen> {
       if (!mounted || !_scroll.hasClients) return;
       final pos = _scroll.position;
       final atBottom = pos.pixels <= 48;
-      // Same rule as _onScroll: the reply growing fires this constantly, so a
-      // live gesture must not be overruled into "follow" by a metrics resync.
-      _stickToBottom =
-          pos.userScrollDirection != ScrollDirection.idle ? false : atBottom;
-      // While streaming the read-hold owns the extent reference; outside it,
-      // re-arm to where the user actually is, or a later delta would be
-      // compensated by a stale amount.
+      // A content-size change is never user intent, and while a turn streams the
+      // extent changes with every character, so re-deriving the latch here is
+      // how a reader gets overruled into "follow". Outside a stream keep the
+      // round-20 behaviour, so collapsing a trace at the newest end still hides
+      // the arrow and resumes following.
       if (!store.streaming) {
+        _stickToBottom = atBottom;
         _pinnedMaxExtent = atBottom ? null : pos.maxScrollExtent;
       }
       _updateArrow();
@@ -549,9 +588,19 @@ class _HomeScreenState extends State<HomeScreen> {
                             // scroll notifications can go stale: collapsing a
                             // trace at the bottom clamps the offset to 0 while
                             // the jump-to-latest arrow stays on screen.
-                            NotificationListener<ScrollMetricsNotification>(
+                            // Catches BOTH content-size changes and scroll
+                            // settles. `ScrollMetricsNotification` and
+                            // `ScrollEndNotification` share no subtype, so the
+                            // base `Notification` is the only type that sees
+                            // both. Handlers filter by axis and this returns
+                            // false, so inner scrollers keep bubbling.
+                            NotificationListener<Notification>(
                               onNotification: (n) {
-                                _onTranscriptMetricsChanged(n);
+                                if (n is ScrollMetricsNotification) {
+                                  _onTranscriptMetricsChanged(n);
+                                } else if (n is ScrollEndNotification) {
+                                  _onScrollEnd(n);
+                                }
                                 return false;
                               },
                               child:

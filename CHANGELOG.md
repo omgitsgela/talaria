@@ -3,6 +3,23 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.2.5
+
+### build 34
+- **Scrolling up while a reply streams no longer snaps back to the newest message.** The real cause
+  was not the streaming growth but a mid-stream SHRINK: the reasoning trace is an expandable row
+  whose height changes as it animates or reflows, so the content size could drop by hundreds of
+  pixels while a turn was running. The read-position hold applied that negative delta, which clamped
+  the scroll offset onto the newest end, and the follow-to-bottom latch then re-armed off that
+  clamped offset. From there every single streamed character pulled the view back to the bottom, so
+  reading an earlier part of the conversation was impossible. Three changes fix it: the follow latch
+  now changes only on a real user gesture (never on a programmatic move or a layout clamp), the hold
+  ignores a shrinking extent while a turn is streaming (the offset is anchored at the newest end, so
+  older content shrinking above the viewport does not move what is on screen), and a scroll that
+  settles at the newest end re-arms following as before. (#1)
+- The change is pinned by four tests, including the shrink-during-stream case that reproduced the
+  original report exactly (`pixels` collapsing to `0.0`).
+
 ## 1.2.4
 
 ### build 33

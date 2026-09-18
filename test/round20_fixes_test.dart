@@ -71,7 +71,15 @@ class R20Gateway extends GatewayClient {
   }
 }
 
+/// The TRANSCRIPT's position, taken from the ListView's own controller.
+///
+/// The old heuristic ("the first Scrollable with a ListView ancestor") can
+/// resolve to an inner scrollable instead - a `SelectableText` carries one -
+/// which made this suite's assertions pass against the wrong object.
 ScrollPosition _transcript(WidgetTester tester) {
+  final listView = tester.widget<ListView>(find.byType(ListView).first);
+  final c = listView.controller;
+  if (c != null && c.hasClients) return c.position;
   final states = tester.stateList<ScrollableState>(
       find.byType(Scrollable, skipOffstage: false));
   for (final st in states) {
@@ -86,7 +94,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   testWidgets(
-      'collapsing a trace at the bottom hides the jump-to-latest arrow',
+      'a metrics change at the newest end hides the jump-to-latest arrow',
       (tester) async {
     tester.view.physicalSize = const Size(1260, 2700);
     tester.view.devicePixelRatio = 3.0;
@@ -118,16 +126,40 @@ void main() {
         reason: 'the expanded trace makes the conversation scrollable');
 
     // Reading it means being away from the newest end: the arrow appears.
-    pos.jumpTo(expandedMax);
+    //
+    // This uses a REAL gesture. A programmatic `pos.jumpTo(...)` is what the
+    // app's own hold/jump machinery does, and after the #1 fix a programmatic
+    // offset change must NOT be read as user intent (that misreading is what
+    // pinned readers to the bottom while a trace streamed). A finger is the
+    // honest simulation of a reader moving up.
+    // Drag from the transcript's own top padding. Points over the expanded
+    // trace's `SelectableText` (the list centre) and over the tile header both
+    // failed to move the offset at all - measured, not assumed - so the gesture
+    // starts where only the viewport can claim it.
+    final g = await tester.startGesture(
+        tester.getTopLeft(find.byType(ListView).first) + const Offset(10, 6));
+    await g.moveBy(const Offset(0, 80));
     await tester.pump();
+    await g.up();
+    await tester.pumpAndSettle();
     expect(pos.pixels, greaterThan(48),
         reason: 'the reader is away from the newest end');
     expect(find.byIcon(Icons.arrow_downward), findsOneWidget,
         reason: 'a scrolled-up reader gets the jump-to-latest arrow');
 
     // Collapse it again — the header is still on screen, so the tap lands.
-    expect(find.text('Reasoning'), findsOneWidget);
-    await tester.tap(find.text('Reasoning'));
+    // Shrink the content so it fits the viewport again.
+    //
+    // This used to tap the trace header a second time. That tap cannot land
+    // once the reader has scrolled up: measured, the viewport starts at y=65
+    // and the header sits at y=83, so ANY upward scroll pushes it behind the
+    // app bar and the tap silently misses (the old assertions were being
+    // satisfied by a different scrollable - a `SelectableText` carries its own,
+    // see `_transcript`). Growing the viewport is the same
+    // ScrollMetricsNotification path with no geometry dependence: the content
+    // stops overflowing, the offset clamps to the newest end, and the arrow must
+    // resync off that metrics change rather than a scroll event.
+    tester.view.physicalSize = const Size(1260, 3600);
     await tester.pumpAndSettle();
 
     expect(pos.maxScrollExtent, 0,
