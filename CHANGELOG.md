@@ -3,6 +3,18 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.2.9
+
+### build 38
+- **Reading is no longer interrupted by a jump.** If you were scrolled up while a reply streamed,
+  the view could occasionally jump to a different part of the conversation, sometimes to the very
+  start of it. The reading-position hold compensates for new content arriving at the newest end, and
+  it was also compensating when the transcript was *replaced* underneath you (which happens when the
+  app recovers a session that the gateway has moved on from). Your offset no longer means the same
+  content after a replacement, so the compensation was moving you to somewhere else entirely, once
+  per layout pass, which is why the jump overshot. A replaced transcript is now recognised and left
+  alone: your position is kept, and following the newest message still works as before. (#16)
+
 ## 1.2.8
 
 ### build 37

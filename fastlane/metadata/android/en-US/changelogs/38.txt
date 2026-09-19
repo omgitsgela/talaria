@@ -1,0 +1,2 @@
+* Fixed: while a reply streamed, reading above the newest message could suddenly jump to a different part of the conversation, sometimes to its very start.
+* Reading position is now kept when the app recovers a session underneath you.
