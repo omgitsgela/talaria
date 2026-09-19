@@ -405,6 +405,7 @@ class ToolActivity {
     this.preview,
     this.summary,
     this.startedAt = 0,
+    this.images = const [],
   });
 
   final String name;
@@ -413,6 +414,11 @@ class ToolActivity {
   String? preview;
   String? summary;
   double startedAt;
+
+  /// Fetchable image sources this tool's result named, in result order. A tool
+  /// that generates or downloads a picture reports it here, and the transcript
+  /// shows it. Empty for every other tool.
+  List<String> images;
 
   factory ToolActivity.fromEvent(Map<String, dynamic> j) => ToolActivity(
         name: (j['name'] ?? 'tool') as String,
@@ -425,6 +431,63 @@ class ToolActivity {
 }
 
 enum ToolState { running, done, error, generated }
+
+/// Fetchable image sources inside a gateway tool result.
+///
+/// The gateway hands a client the PARSED result of a tool, and a tool that
+/// generates or downloads a picture names it there: an `image` field holding a
+/// URL, an `images` list, a nested `url`. Only sources this device can actually
+/// fetch are returned, meaning an http(s) link to an image file or a data URL.
+/// A server-side path is skipped on purpose: promising an image the phone cannot
+/// load would be worse than showing nothing, so those keep the placeholder.
+List<String> fetchableImageSources(Object? result, {int depth = 0}) {
+  if (result == null || depth > 4) return const [];
+  final found = <String>[];
+  const keys = [
+    'image',
+    'image_url',
+    'url',
+    'urls',
+    'images',
+    'data_url',
+    'result',
+  ];
+  const imagePath =
+      r'\.(png|jpe?g|gif|webp|bmp|avif|heic)$';
+
+  void consider(Object? value) {
+    if (value is String) {
+      final candidate = value.trim();
+      if (candidate.startsWith('data:image/')) {
+        if (!found.contains(candidate)) found.add(candidate);
+        return;
+      }
+      if (!candidate.startsWith('http://') && !candidate.startsWith('https://')) {
+        return;
+      }
+      final path = Uri.tryParse(candidate)?.path ?? '';
+      if (RegExp(imagePath, caseSensitive: false).hasMatch(path) &&
+          !found.contains(candidate)) {
+        found.add(candidate);
+      }
+      return;
+    }
+    if (value is Map) {
+      for (final key in keys) {
+        if (value.containsKey(key)) consider(value[key]);
+      }
+      return;
+    }
+    if (value is List) {
+      for (final item in value) {
+        consider(item);
+      }
+    }
+  }
+
+  consider(result);
+  return found;
+}
 
 class ModelOption {
   const ModelOption({

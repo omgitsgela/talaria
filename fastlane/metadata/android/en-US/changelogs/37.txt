@@ -1,0 +1,3 @@
+* Images the agent produces now appear in the conversation, under the tool that made them.
+* A picture the tool reports as a link or as embedded data is shown, and opens full size when tapped.
+* Anything the phone cannot load still shows an honest placeholder.

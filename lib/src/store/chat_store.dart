@@ -1315,6 +1315,16 @@ class ChatStore extends ChangeNotifier {
                 : ToolState.done;
             final summary = ev.payload['summary'] as String?;
             if (summary != null) t.summary = summary;
+            // A tool that produced or downloaded a picture names it in the
+            // result, and the result is what the gateway sends a client. Only
+            // fetchable sources are kept, so the row never promises an image
+            // this device cannot load.
+            final resultImages = fetchableImageSources(ev.payload['result']);
+            if (resultImages.isNotEmpty) t.images = resultImages;
+            // A tool that produced or downloaded a picture names it in the
+            // result, and the result is what the gateway sends a client. Only
+            // fetchable sources are kept, so the row never promises an image
+            // this device cannot load.
           }
         }
         break;

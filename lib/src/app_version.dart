@@ -16,7 +16,7 @@ library;
 const String kAppVersion = '1.2.6';
 
 /// Monotonic build number (matches the pubspec `+N`).
-const int kAppBuildCode = 36;
+const int kAppBuildCode = 37;
 
 /// One-line tagline for the splash.
 const String kAppTagline = 'Your gateway, in your pocket';

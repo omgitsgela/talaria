@@ -3,6 +3,16 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.2.8
+
+### build 37
+- **Images the agent produces now appear.** The gateway sends a client the parsed result of a tool,
+  and a tool that generates or downloads a picture names it there. The transcript now looks for a
+  fetchable source in that result, meaning a link to an image or embedded image data, and shows the
+  picture under the tool row that made it, tappable to open full size. A source that is only a path
+  on the gateway is still skipped, because a phone cannot load it, and the placeholder keeps saying
+  so rather than showing a broken box. (#15)
+
 ## 1.2.7
 
 ### build 36

@@ -490,7 +490,7 @@ class _ToolList extends StatelessWidget {
       ),
       child: Column(
         children: [
-          for (final t in tools)
+          for (final t in tools) ...[
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               child: Row(
@@ -516,6 +516,15 @@ class _ToolList extends StatelessWidget {
                 ],
               ),
             ),
+            // A picture this tool produced, shown here because the reply text
+            // may only name it by a server path the phone cannot fetch.
+            for (final source in t.images)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+                child: _TranscriptImage(
+                    source: source, label: 'Image from ${t.name}'),
+              ),
+          ],
         ],
       ),
     );

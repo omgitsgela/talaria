@@ -35,7 +35,8 @@ This is an unofficial companion. It is not affiliated with or endorsed by Nous R
 - **Attachments**: take a photo with the camera or pick one from the gallery, or send a file.
   Attachments wait above the composer with a preview until you send them.
 - **Images in replies render**, sized for the phone and tappable to open full size, including a photo
-  you sent yourself, with a labelled placeholder for anything the app genuinely cannot fetch.
+  you sent yourself and pictures the agent produces, with a labelled placeholder for anything the app
+  genuinely cannot fetch.
 - **Notifications** for finished replies and for prompts that need you, each opening the right
   conversation.
 - **Markdown replies** whose text you can select across the whole reply, with working links, plus a
@@ -231,10 +232,11 @@ still holds, so it appears as the picture you took rather than a placeholder; th
 the current run only, bounded in size and count, so after it is evicted, or on another device, the
 placeholder is what you see.
 
-An image the agent itself produces is a known limitation: the gateway names it in the transcript but
-does not send its bytes to a remote client, so it shows the labelled placeholder. The only place the
-gateway hands image bytes to a client is the reply to an image-generation request, which is a call
-this app does not make.
+An image the agent produces appears under the tool row that made it, tappable to open full size. The
+gateway sends a client the parsed result of each tool, and a tool that generated or downloaded a
+picture names it there as a link or as embedded data; that is what gets shown. If a tool only names a
+file on the gateway itself, there is nothing this phone can load, and the placeholder says so instead
+of showing a broken box.
 
 ### Notifications
 
