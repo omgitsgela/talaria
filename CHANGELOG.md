@@ -19,6 +19,13 @@ rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.d
   paths all render: constrained to a phone-sized preview, rounded, and tappable to open full size.
   Anything the phone genuinely cannot fetch shows a labelled placeholder rather than a broken box,
   so a reply is never silently missing a picture. (#12)
+- **A photo you sent now appears in the conversation.** The transcript names a sent photo by the
+  gateway-staged path, which a phone cannot fetch, so it used to appear as a placeholder even though
+  the app had the bytes moments earlier. Those bytes are now retained for the run under the same
+  path, bounded in size and count, and the transcript draws from them. The placeholder is unchanged
+  as the fallback. One limitation remains and is documented: an image the *agent* produces is named
+  in the transcript but its bytes are never sent to a remote client, so it still shows a placeholder.
+  (#11, #12)
 - **Tap the context reading for a breakdown.** The compact reading in the title bar now opens a
   meter: category slices (system prompt, tools, memory, conversation) against the model's window,
   with used and remaining. It is fetched when you open it, so the ordinary turn path costs no extra
