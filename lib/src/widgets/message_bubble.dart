@@ -291,7 +291,7 @@ class _MessageText extends StatelessWidget {
           // the material fallback stylesheet hardcodes
           // `blockquoteDecoration: Colors.blue.shade100` (a LIGHT blue that is
           // not brightness-aware), and MarkdownBody merges the app stylesheet
-          // ON TOP of that fallback — any token the app does not override falls
+          // ON TOP of that fallback: any token the app does not override falls
           // through to it, so every quoted passage inherited that color and
           // rendered as white text on light blue in dark mode. Use a
           // theme surface one step below the bubble (inset panel in both
@@ -331,7 +331,7 @@ class _MessageText extends StatelessWidget {
               // No handler for this scheme (e.g. tel:/mailto: on some devices).
             }
           } else {
-            // Treat as a relative web URL — open in the browser.
+            // Treat as a relative web URL: open in the browser.
             try {
               await launchUrl(Uri.parse('https://$url'),
                   mode: LaunchMode.externalApplication);
