@@ -26,16 +26,20 @@ This is an unofficial companion. It is not affiliated with or endorsed by Nous R
   or approve without going back to your desk.
 - **Conversation list** with pinning and time buckets, so long-running work stays where you can find
   it.
-- **Model, reasoning level and speed per conversation**, chosen from your gateway's own model list.
+- **Model, reasoning level and speed per conversation**, chosen from your gateway's own model list,
+  with a default reasoning level in Settings for new conversations.
 - **Context readout** in the top bar, showing how much of the model's window the conversation is
-  using.
+  using. Tap it for a breakdown of what is filling that window.
 - **Goals**, mirrored from the gateway, with the current goal pinned above the composer.
 - **Slash commands** typed straight into the composer, with suggestions served by your gateway.
-- **Attachments**: send an image or a file through the gateway.
+- **Attachments**: take a photo with the camera or pick one from the gallery, or send a file.
+  Attachments wait above the composer with a preview until you send them.
+- **Images in replies render**, sized for the phone and tappable to open full size, with a labelled
+  placeholder for anything the app genuinely cannot fetch.
 - **Notifications** for finished replies and for prompts that need you, each opening the right
   conversation.
-- **Markdown replies** with selectable text and working links, plus a switch to plain text if you
-  prefer.
+- **Markdown replies** whose text you can select across the whole reply, with working links, plus a
+  switch to plain text if you prefer.
 - **Syncs with your other clients**, so a conversation touched on the desktop or in a terminal shows
   the same thing here.
 
@@ -184,6 +188,10 @@ currently using, taken from the gateway's own usage report. It stays hidden unti
 a real measurement rather than guessing. If it approaches the maximum, **Compress context** from the
 conversation menu is the way to free space.
 
+Tap the reading for a breakdown: each part of the window (the system prompt, tools, memory and the
+conversation itself) with its own slice, measured against the model's window. The breakdown is read
+when you open it, so it reflects the conversation as it stands right now.
+
 ### Slash commands
 
 Type `/` in the composer and Talaria asks your gateway which commands it offers, then shows matching
@@ -210,8 +218,16 @@ When Hermes needs a decision, a card appears in the conversation:
 
 ### Attachments
 
-The composer has buttons to attach an image or a file, both staged through the gateway. Attachments
-appear above the input with a remove button until you send them.
+The composer has buttons to pick a photo, take one with the camera, or attach a file. Whatever you
+choose is staged through the gateway straight away and appears above the input with a preview,
+filename, size and a remove button; removing an image detaches it on the gateway too. Images are
+checked against the gateway's size limit before anything is uploaded, so an oversized photo is
+refused with a notice instead of failing halfway. Files that are not images use the gateway's
+separate file path, exactly as before.
+
+Images in a reply render when the app can obtain them: data URLs, web links, markdown image syntax
+and image references in the message text. Anything the app genuinely cannot fetch shows a labelled
+placeholder rather than a broken box, so a reply is never silently missing a picture.
 
 ### Notifications
 
@@ -225,6 +241,9 @@ arriving.
 - **Appearance**: follow the system theme, or force light or dark.
 - **Display**: render Markdown in replies, or turn it off for plain text.
 - **Model**: browse the gateway's models and profiles, and see which sessions are live.
+- **Reasoning**: the reasoning level used as the default, read from your gateway and written back as
+  the global setting. The per-conversation level in the model menu overrides it for that
+  conversation.
 - **About**: the app version.
 
 The connection menu lives in Settings too, with **Reconnect**, **Disconnect** and **Quit Talaria**.
