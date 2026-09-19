@@ -103,6 +103,10 @@ class _HomeScreenState extends State<HomeScreen> {
   double? _pinnedMaxExtent;
 
   String? _lastSessionId;
+
+  /// The store's transcript epoch last seen here. A CHANGE means the list under
+  /// the reader was replaced rather than grown (see [ChatStore.transcriptEpoch]).
+  int? _seenTranscriptEpoch;
   ChatStore? _trackedStore;
 
   /// The topmost message index in the current viewport (min index built this
@@ -156,6 +160,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _trackedStore = s;
       if (s != null) {
         _lastSessionId = null; // first bind: treat as a switch → jump to bottom.
+        _seenTranscriptEpoch = s.transcriptEpoch;
         s.addListener(_onStoreChanged);
         _noticeSub = s.notices.listen((text) {
           if (!mounted) return;
@@ -270,8 +275,22 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
     if (_stickToBottom) {
+      _seenTranscriptEpoch = s.transcriptEpoch;
       _scheduleScrollToBottom();
     } else {
+      // A REPLACED transcript is not a grown one. The reader's offset no longer
+      // describes the same content, and compensating for the extent change is
+      // what flung a parked reader (offset 2500 of 9112) to 9978 of 12851 when a
+      // silent rehydrate landed mid-turn: exactly twice the extent change,
+      // because the compensation applied once per layout pass. Hold still and
+      // re-baseline instead; the hold resumes on the next real growth.
+      if (_seenTranscriptEpoch != s.transcriptEpoch) {
+        _seenTranscriptEpoch = s.transcriptEpoch;
+        _pinnedMaxExtent = null;
+        _lastReadIndex.remove(sid);
+        _updateArrow();
+        return;
+      }
       // The user is READING (scrolled up). The reversed list drifts toward
       // the newest end as that end grows (a streamed reply appended at
       // offset 0 widens the extent without moving the offset), so pin their

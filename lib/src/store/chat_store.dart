@@ -148,6 +148,20 @@ class ChatStore extends ChangeNotifier {
 
   // Transcript of the active session.
   final List<ChatMessage> _messages = [];
+
+  /// Bumped whenever the TRANSCRIPT ITSELF is replaced or reordered rather than
+  /// appended to: a rehydrate, a resume, a session switch, a delete.
+  ///
+  /// The view needs to tell "the newest end grew", which the read-hold
+  /// compensates for by moving the reader's offset, from "the list under the
+  /// reader was replaced", where moving them is a jump to somewhere else in the
+  /// conversation. Measured: a parked reader at offset 2500 was thrown to 9978
+  /// (of 12851) by a silent rehydrate, exactly twice the extent change because
+  /// the compensation applied once per layout pass.
+  int _transcriptEpoch = 0;
+
+  /// See [_transcriptEpoch].
+  int get transcriptEpoch => _transcriptEpoch;
   List<ChatMessage> get messages => List.unmodifiable(_messages);
 
   bool _streaming = false;
@@ -1010,6 +1024,7 @@ class ChatStore extends ChangeNotifier {
       _verifiedLiveSessionId = sid;
       _activeStoredSessionId = null;
       _messages.clear();
+      _transcriptEpoch++;
       _streaming = false;
       _statusLine = '';
       _resetTrackedStatus();
@@ -1630,6 +1645,9 @@ class ChatStore extends ChangeNotifier {
     }
     _messages.removeRange(prefix, _messages.length);
     _messages.addAll(fresh.skip(prefix));
+    // The list under the reader has changed shape, so any pixel measurement the
+    // view is holding no longer describes this transcript.
+    _transcriptEpoch++;
   }
 
   static bool _sameTranscript(List<ChatMessage> a, List<ChatMessage> b) {
@@ -1723,6 +1741,7 @@ class ChatStore extends ChangeNotifier {
     _activeSessionId = null;
     _verifiedLiveSessionId = null;
     _messages.clear();
+    _transcriptEpoch++;
     _streaming = false;
     _statusLine = '';
     _resetTrackedStatus();
@@ -1820,6 +1839,7 @@ class ChatStore extends ChangeNotifier {
       _activeStoredSessionId =
           (res['resumed'] ?? res['session_key'] ?? id).toString();
       _messages.clear();
+      _transcriptEpoch++;
       _resetTrackedStatus();
       // A request card belonging to the OUTGOING session is stale the moment
       // the conversation switches — answering it from the new session would
@@ -1989,6 +2009,7 @@ class ChatStore extends ChangeNotifier {
       // was still the old stored conversation.
       _activeStoredSessionId = null;
       _messages.clear();
+      _transcriptEpoch++;
       _streaming = false;
       _resetTrackedStatus();
       // Fresh transcript — nothing to scroll to yet; consume any pending jump
@@ -2042,6 +2063,7 @@ class ChatStore extends ChangeNotifier {
         _activeSessionId = null;
         _activeStoredSessionId = null;
         _messages.clear();
+      _transcriptEpoch++;
         _streaming = false;
         _statusLine = '';
         _activeGoal = null;
