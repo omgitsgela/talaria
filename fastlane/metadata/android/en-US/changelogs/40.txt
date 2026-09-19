@@ -1,0 +1,2 @@
+* Fixed: stopping a turn could leave the working indicator spinning forever on that message.
+* Fixed: interrupting repeatedly could leave earlier messages stuck mid-render, each still showing as working.

@@ -2231,6 +2231,25 @@ class ChatStore extends ChangeNotifier {
   /// stale local flag is dropped. A session the gateway reports working
   /// without a local turn (started on another client) is marked working so
   /// the UI is honest.
+  /// Close out transcript rows that a lost terminal event left open.
+  ///
+  /// `message.complete` is what marks an assistant row finished, and an
+  /// interrupted turn does not always deliver one. The row then keeps its
+  /// "Hermes is working…" indicator, and its reasoning trace keeps a live
+  /// spinner, because both are gated on that one flag. Called when the turn is
+  /// authoritatively over, or the moment the user stops it, so nothing spins
+  /// behind a turn that has ended.
+  void _sealPendingTranscript() {
+    var changed = false;
+    for (final m in _messages) {
+      if (!m.pending) continue;
+      m.pending = false;
+      changed = true;
+    }
+    if (!changed) return;
+    _notify();
+  }
+
   Future<void> reconcileActiveTurnStatus() async {
     final now = DateTime.now().millisecondsSinceEpoch;
     if (now - _lastStatusPollAt < 1500) return;
@@ -2275,6 +2294,14 @@ class ChatStore extends ChangeNotifier {
           // working on the next poll when the drain starts.
           _streaming = false;
           _statusLine = '';
+        }
+        if (activeStatus == 'idle') {
+          // A turn that was STOPPED, here or on another client, may never
+          // deliver its terminal event. Seal whatever it left open, so a row
+          // that was interrupted keeps neither the working indicator nor a
+          // spinning trace. Deliberately not gated on `_streaming`: repeated
+          // interrupts are exactly how a row from an earlier turn stays stuck.
+          _sealPendingTranscript();
         }
       } else if (_streaming && _activeSessionSeenLive) {
         // The session is no longer a live gateway session at all (finalized,
@@ -2504,10 +2531,14 @@ class ChatStore extends ChangeNotifier {
     _interrupting = false;
     _notify();
     if (ok) {
-      // The gateway is tearing the turn down. Confirm via the authoritative
-      // status (bypassing the throttle) so the UI reliably settles to idle,
-      // and schedule one more poll in case the first lands before the
-      // interrupt has propagated.
+      // Settle the transcript immediately: the user just stopped the turn, so
+      // the row it aborted must not keep saying "Hermes is working…" (nor keep
+      // its reasoning trace spinning) until a poll happens to land. The poll
+      // below then confirms against the authoritative status, and re-marks the
+      // session working if the interrupt did not actually take.
+      _sealPendingTranscript();
+      _streaming = false;
+      _statusLine = '';
       _lastStatusPollAt = 0;
       unawaited(reconcileActiveTurnStatus());
     }

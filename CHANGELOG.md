@@ -3,6 +3,17 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.3.1
+
+### build 40
+- **Stopping a turn no longer leaves anything spinning.** Both the "Hermes is working…" indicator and a
+  reasoning trace's spinner are driven by one flag on the row, and an interrupted turn does not always
+  deliver the event that clears it. So a turn you stopped kept its indicator running, and repeating that
+  left earlier messages stuck in a rendering state, each of them still believing it was working. The
+  app now settles the transcript the moment you press Stop, and again whenever the gateway confirms the
+  session is idle, so a stopped turn leaves neither a spinner nor a stuck row behind. What the
+  interrupted turn had already thought is still kept. (#18)
+
 ## 1.3.0
 
 ### build 39
