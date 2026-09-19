@@ -9,6 +9,7 @@ import '../gateway/config.dart';
 import '../gateway/http_service.dart';
 import '../gateway/native_oauth.dart';
 import '../gateway/oauth_flow.dart';
+import '../media/attachment_cache.dart';
 import '../media/image_attachment.dart';
 import '../models/context_breakdown.dart';
 import '../models/context_usage.dart';
@@ -2782,8 +2783,14 @@ class ChatStore extends ChangeNotifier {
       final ref = result.path;
       if (ref.isNotEmpty) {
         _pendingAttachments.add(ref);
+        final copy = Uint8List.fromList(bytes);
         _attachmentDetails[ref] = PendingAttachment(ref: ref, filename: filename,
-            sizeBytes: bytes.length, bytes: Uint8List.fromList(bytes));
+            sizeBytes: bytes.length, bytes: copy);
+        // Retain the bytes under the staged path: that is how the stored
+        // transcript will name this image, and a phone cannot fetch a gateway
+        // path, so this copy is what lets the user's own photo appear in the
+        // conversation instead of a placeholder.
+        AttachmentCache.put(ref, copy);
       }
       _notify();
       return ref;

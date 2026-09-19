@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../media/attachment_cache.dart';
 import '../models/models.dart';
 import '../theme/markdown_preference.dart';
 
@@ -394,6 +395,12 @@ class _TranscriptImage extends StatelessWidget {
   final String label;
 
   ImageProvider? _provider() {
+    // A photo the user has just sent is retained in this process under the
+    // staged path the transcript names. Checked before anything else because it
+    // is the only source that can work for a server-side path this device
+    // cannot fetch; a miss still falls through to the placeholder below.
+    final retained = AttachmentCache.bytesFor(source);
+    if (retained != null && retained.isNotEmpty) return MemoryImage(retained);
     try {
       final uri = Uri.parse(source);
       if (uri.scheme == 'data') {
