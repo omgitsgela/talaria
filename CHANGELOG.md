@@ -3,6 +3,30 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.2.7
+
+### build 36
+- **Select text across a whole reply.** In markdown mode every paragraph was its own selectable
+  widget, so a selection could not leave the block it started in. The message body now renders
+  inside a single selection region: one drag or one long-press extends across the whole reply, and
+  "Select all" covers the message. Plain-text mode and the reasoning-trace body behave the same
+  way, and a vertical drag on the transcript still scrolls the list. (#10)
+- **Send photos from the gallery or the camera.** Attach one or more images, see what is pending
+  with a preview, filename and size, and remove any of them before sending. Images are staged
+  through the gateway's image path with its byte cap enforced before anything is uploaded, and
+  removing a staged image detaches it server-side. Non-image files keep using the file path. (#11)
+- **Images in replies render.** Data URLs, http(s) images, markdown image syntax and bare image
+  paths all render: constrained to a phone-sized preview, rounded, and tappable to open full size.
+  Anything the phone genuinely cannot fetch shows a labelled placeholder rather than a broken box,
+  so a reply is never silently missing a picture. (#12)
+- **Tap the context reading for a breakdown.** The compact reading in the title bar now opens a
+  meter: category slices (system prompt, tools, memory, conversation) against the model's window,
+  with used and remaining. It is fetched when you open it, so the ordinary turn path costs no extra
+  round trip, and a gateway that does not report a breakdown shows nothing rather than a guess. (#13)
+- **Reasoning level from Settings.** A Reasoning section reads the level currently in force, writes
+  the global default, and re-reads afterwards so a write that did not stick is reported as not
+  applied rather than shown as success. Unsupported levels are refused. (#14)
+
 ## 1.2.6
 
 ### build 35

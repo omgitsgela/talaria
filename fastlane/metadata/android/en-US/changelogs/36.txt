@@ -1,0 +1,5 @@
+* Markdown replies: select across the whole message, not just one paragraph.
+* Send photos: gallery or camera, with previews before you send and a way to remove them.
+* Images in replies render now, tappable to open full size. Anything the phone cannot fetch shows an honest placeholder, never a broken box.
+* Tap the context reading in the title bar for a breakdown of what fills the model's window.
+* Set the reasoning level from Settings and see the live value.
