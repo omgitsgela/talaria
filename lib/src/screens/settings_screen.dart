@@ -8,10 +8,13 @@ import 'package:url_launcher/url_launcher.dart';
 import '../diagnostics/error_report.dart';
 
 import '../app_version.dart';
+import '../gateway/client.dart';
 import '../models/models.dart';
+import '../models/reasoning_effort.dart';
 import '../store/chat_store.dart';
 import '../theme/markdown_preference.dart';
 import '../theme/theme_preference.dart';
+import '../widgets/reasoning_effort_selector.dart';
 
 /// Settings surface (desktop parity): model switcher, profile list, the
 /// toggle-style config keys (`config.get`/`config.set`), and a status block
@@ -19,8 +22,13 @@ import '../theme/theme_preference.dart';
 /// uses the gateway's live/deferred `config.set model` handshake; expensive
 /// models require an explicit confirm (gateway returns `confirm_required`).
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key, required this.store});
+  const SettingsScreen({super.key, required this.store, this.configTransport});
   final ChatStore store;
+
+  /// Config transport for the reasoning-effort card. Null in production: the
+  /// card then opens its own short-lived connection from [store.config],
+  /// because ChatStore does not expose its client. Tests inject a fake.
+  final ConfigTransport? configTransport;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -135,6 +143,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     title: 'Model',
                     icon: Icons.smart_toy_outlined,
                     child: _ModelList(store: store, onPick: _pickModel)),
+                const SizedBox(height: 12),
+                _SectionCard(
+                    title: 'Reasoning',
+                    icon: Icons.psychology_outlined,
+                    child: _ReasoningEffortCard(
+                        store: store, transport: widget.configTransport)),
                 const SizedBox(height: 12),
                 _SectionCard(
                     title: 'Profiles',
@@ -921,6 +935,155 @@ class _ToggleListState extends State<_ToggleList> {
           ),
         );
       }).toList(),
+    );
+  }
+}
+
+/// Reasoning-effort control (issue #14). Reads the live value with
+/// `config.get reasoning`, writes through `config.set reasoning` with global
+/// scope (persisting `agent.reasoning_effort`, the Desktop parity behavior),
+/// then re-reads so a write that did not stick is shown as a failure.
+///
+/// ChatStore keeps its GatewayClient private, so in production this card
+/// opens its own short-lived connection (auto-reconnect off) for the load
+/// and the writes, and closes it on dispose. The store refreshes
+/// `config.oauthToken` in place, so a fresh connect picks up a rotated
+/// token. Tests inject [transport] and skip the socket entirely.
+class _ReasoningEffortCard extends StatefulWidget {
+  const _ReasoningEffortCard({required this.store, this.transport});
+  final ChatStore store;
+  final ConfigTransport? transport;
+
+  @override
+  State<_ReasoningEffortCard> createState() => _ReasoningEffortCardState();
+}
+
+class _ReasoningEffortCardState extends State<_ReasoningEffortCard> {
+  ConfigTransport? _transport;
+  GatewayClient? _ownedClient;
+  ReasoningEffort? _effort;
+  bool _loading = true;
+  bool _busy = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_load());
+  }
+
+  @override
+  void dispose() {
+    final client = _ownedClient;
+    _ownedClient = null;
+    if (client != null) unawaited(client.dispose());
+    super.dispose();
+  }
+
+  Future<ConfigTransport> _resolveTransport() async {
+    final injected = widget.transport;
+    if (injected != null) return injected;
+    final client = GatewayClient(widget.store.config, autoReconnect: false);
+    try {
+      await client.connect();
+    } catch (_) {
+      await client.dispose();
+      rethrow;
+    }
+    _ownedClient = client;
+    return client.request;
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final t = await _resolveTransport();
+      final effort = await ReasoningEffort.load(t);
+      if (!mounted) return;
+      setState(() {
+        _transport = t;
+        _effort = effort;
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = '$e';
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _select(String level) async {
+    final t = _transport;
+    final effort = _effort;
+    if (t == null || effort == null || _busy) return;
+    setState(() => _busy = true);
+    try {
+      final res = await effort.write(t, level);
+      if (!mounted) return;
+      if (res.refused) {
+        _showSnack(res.refusal!);
+      } else {
+        // The re-read value is the truth either way; only the message differs.
+        setState(() => _effort = ReasoningEffort(res.actual));
+        _showSnack(res.applied
+            ? 'reasoning = ${res.actual}'
+            : 'Gateway kept reasoning at '
+                "'${res.actual.isEmpty ? 'unknown' : res.actual}'");
+      }
+    } catch (e) {
+      if (mounted) _showSnack('$e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _showSnack(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+          content: Text(message.length > 120
+              ? '${message.substring(0, 120)}…'
+              : message)),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    if (_loading) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 12),
+        child: Center(
+            child: SizedBox(
+                width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
+      );
+    }
+    if (_error != null) {
+      return Row(
+        children: [
+          Expanded(
+            child: Text('Could not read the reasoning effort: $_error',
+                style:
+                    theme.textTheme.bodySmall?.copyWith(color: cs.error)),
+          ),
+          TextButton(onPressed: _load, child: const Text('Retry')),
+        ],
+      );
+    }
+    final effort = _effort;
+    if (effort == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 4, bottom: 4),
+      child: ReasoningEffortSelector(
+        effort: effort,
+        busy: _busy,
+        onSelect: _select,
+      ),
     );
   }
 }
