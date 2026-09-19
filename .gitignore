@@ -41,3 +41,6 @@ Thumbs.db
 *.swp
 *.orig
 *~
+
+# Subagent worktrees (delegation.worktree_isolation) - never tracked
+.worktrees/
