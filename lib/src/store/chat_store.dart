@@ -9,6 +9,9 @@ import '../gateway/config.dart';
 import '../gateway/http_service.dart';
 import '../gateway/native_oauth.dart';
 import '../gateway/oauth_flow.dart';
+import '../media/attachment_cache.dart';
+import '../media/image_attachment.dart';
+import '../models/context_breakdown.dart';
 import '../models/context_usage.dart';
 import '../models/goal_status.dart';
 import '../models/models.dart';
@@ -284,8 +287,22 @@ class ChatStore extends ChangeNotifier {
   ContextUsage _context = ContextUsage.unknown;
   ContextUsage get contextUsage => _context;
 
+  /// Full breakdown (category slices plus the model window) behind the
+  /// context meter. Null until a reading arrives, so the meter renders
+  /// nothing rather than inventing a bar.
+  ContextBreakdown? _breakdown;
+
   /// Compact app-bar label (`24.5k/128k`), or null when unknown.
   String? get contextLabel => _context.label;
+
+  /// The breakdown behind the meter, or null when the gateway has not
+  /// reported one.
+  ContextBreakdown? get contextBreakdown => _breakdown;
+
+  /// The live gateway client. A screen that needs a one-off config call
+  /// reuses this socket instead of opening a second connection to the
+  /// same gateway.
+  GatewayClient get client => _client;
 
   /// The gateway reports usage in two shapes: nested under `usage` on
   /// `session.info` and `message.complete`, and flat on a `session.usage`
@@ -314,6 +331,34 @@ class ChatStore extends ChangeNotifier {
       }
     } catch (_) {
       // Best-effort; the event sources fill this in on the next turn.
+    }
+  }
+
+  /// Reads the category breakdown on demand. The sheet that shows it is the
+  /// only consumer, so the ordinary turn path makes no extra round trip and a
+  /// gateway that does not expose the method simply yields an empty meter.
+  Future<ContextBreakdown> loadContextBreakdown() async {
+    final sid = _activeSessionId;
+    if (sid == null ||
+        sid.isEmpty ||
+        _client.state != GwConnectionState.open) {
+      return _breakdown ?? ContextBreakdown.empty;
+    }
+    try {
+      final raw =
+          await _client.request('session.context_breakdown', {'session_id': sid});
+      if (_disposed || _activeSessionId != sid) {
+        return _breakdown ?? ContextBreakdown.empty;
+      }
+      final next = ContextBreakdown.fromPayload(raw);
+      if (next.hasData || _breakdown != null) {
+        _breakdown = next;
+        _notify();
+      }
+      return next;
+    } catch (_) {
+      // An empty meter beats a guessed one.
+      return _breakdown ?? ContextBreakdown.empty;
     }
   }
 
@@ -2258,8 +2303,23 @@ class ChatStore extends ChangeNotifier {
   /// (gateway `session_auto_continue._handle_busy_submit`). A plain mid-turn
   /// send (no flag) keeps the session's busy mode, like the desktop.
   Future<bool> send(String text, {bool asQueue = false}) async {
+    if (_sending) return false;
+    _sending = true;
+    _notify();
+    try {
+      return await _sendWithAttachments(text, asQueue: asQueue);
+    } catch (e) {
+      _fail(_shortError(e));
+      return false;
+    } finally {
+      _sending = false;
+      _notify();
+    }
+  }
+
+  Future<bool> _sendWithAttachments(String text, {required bool asQueue}) async {
     final trimmed = text.trim();
-    if (trimmed.isEmpty && _pendingAttachments.isEmpty) return false;
+    if (trimmed.isEmpty && pendingAttachments.isEmpty) return false;
     if (_client.state != GwConnectionState.open) {
       _connectError = 'Not connected';
       notifyListeners();
@@ -2268,6 +2328,13 @@ class ChatStore extends ChangeNotifier {
     // Ensure a session exists (draft -> real on first prompt).
     final sid = await _ensureSession();
     if (sid == null || sid.isEmpty || _disposed) return false;
+    final generation = _attachGen;
+    for (final image in List<PendingAttachment>.of(_queuedImages.values)) {
+      final ref = await attachImageBytes(image.bytes!, filename: image.filename);
+      if (_disposed || generation != _attachGen || sid != _activeSessionId) return false;
+      if (!_pendingAttachments.contains(ref)) return false;
+      _queuedImages.remove(image.ref);
+    }
     // Prepend file refs so the agent can resolve staged workspace files.
     final fileRefs =
         _pendingAttachments.where((r) => r.startsWith('@file:')).join(' ');
@@ -2295,7 +2362,7 @@ class ChatStore extends ChangeNotifier {
         });
         // Remove only the snapshotted refs; refs added during submit survive.
         for (final ref in snapshot) {
-          _pendingAttachments.remove(ref);
+          _removeAttachment(ref);
         }
         // Keep the process alive while the turn streams in the background and
         // refresh the keep-alive notification so the user sees work in
@@ -2549,7 +2616,31 @@ class ChatStore extends ChangeNotifier {
   // ── Attachments ────────────────────────────────────────────────────
 
   final List<String> _pendingAttachments = [];
-  List<String> get pendingAttachments => List.unmodifiable(_pendingAttachments);
+  final Map<String, PendingAttachment> _attachmentDetails = {};
+  final Map<String, PendingAttachment> _queuedImages = {};
+  int _imageSequence = 0;
+  bool _sending = false;
+  bool get sendingAttachments => _sending;
+  List<String> get pendingAttachments =>
+      List.unmodifiable([..._pendingAttachments, ..._queuedImages.keys]);
+  List<PendingAttachment> get attachmentDetails => List.unmodifiable([
+    for (final ref in _pendingAttachments)
+      if (_attachmentDetails[ref] != null) _attachmentDetails[ref]!,
+    ..._queuedImages.values,
+  ]);
+
+  void queueImage(Uint8List bytes, {required String filename}) {
+    ImageAttachmentService.validate(bytes);
+    final ref = 'local-image:${++_imageSequence}';
+    _queuedImages[ref] = PendingAttachment(ref: ref, filename: filename,
+        sizeBytes: bytes.length, bytes: Uint8List.fromList(bytes));
+    _notify();
+  }
+
+  void _removeAttachment(String ref) {
+    _pendingAttachments.remove(ref);
+    _attachmentDetails.remove(ref);
+  }
 
   /// In-flight session creation future shared across concurrent callers.
   Future<String?>? _inFlightSessionCreation;
@@ -2606,6 +2697,7 @@ class ChatStore extends ChangeNotifier {
     required String? sessionId,
     required Duration timeout,
   }) async {
+    final queuedRefs = _queuedImages.keys.toList();
     // Snapshot the refs to detach.  Any ref added while detach is in flight
     // (the "newly added during await" window) is intentionally NOT in this
     // list and survives — it belongs to whatever session is current then.
@@ -2616,6 +2708,10 @@ class ChatStore extends ChangeNotifier {
     if (sessionId == null || sessionId.isEmpty || imageRefs.isEmpty) {
       // Nothing to reach the gateway for; safe to drop the whole list.
       _pendingAttachments.clear();
+      _attachmentDetails.clear();
+      for (final ref in queuedRefs) {
+        _queuedImages.remove(ref);
+      }
       return true;
     }
     var allOk = true;
@@ -2641,7 +2737,10 @@ class ChatStore extends ChangeNotifier {
       // Only the refs we confirmed detached are dropped; racing additions
       // added after the snapshot are left intact.
       for (final ref in imageRefs) {
-        _pendingAttachments.remove(ref);
+        _removeAttachment(ref);
+      }
+      for (final ref in queuedRefs) {
+        _queuedImages.remove(ref);
       }
       return true;
     }
@@ -2654,28 +2753,25 @@ class ChatStore extends ChangeNotifier {
   Future<String> attachImageBytes(
     List<int> bytes, {
     String filename = 'image.png',
-    String ext = 'png',
+    String ext = '',
   }) async {
     final attachGen = _attachGen;
     try {
+      ImageAttachmentService.validate(bytes);
       final sid = await _ensureSession();
       if (sid == null || sid.isEmpty) {
         // A stale session.create (user switched while it was in flight)
         // returned no usable session — discard the in-flight attach.
         return '';
       }
-      final res = await _client.request('image.attach_bytes', {
-        'session_id': sid,
-        'content_base64': base64Encode(bytes),
-        'filename': filename,
-        'ext': ext,
-      });
+      final result = await ImageAttachmentService(_client, sessionId: sid)
+          .attach(bytes, filename: filename, ext: ext);
       // Guard: generation check catches the case where the user detached
       // the old image, switched session, then switched back to the same
       // stored session — a sid-only check would pass but the generation
       // (bumped by every lifecycle transition) correctly marks the result stale.
       if (attachGen != _attachGen || sid != _activeSessionId) {
-        final path = (res['path'] ?? res['ref'] ?? '').toString();
+        final path = result.path;
         if (path.isNotEmpty) {
           try {
             await _client
@@ -2684,13 +2780,25 @@ class ChatStore extends ChangeNotifier {
         }
         return '';
       }
-      final ref = (res['path'] ?? res['ref'] ?? res['name'] ?? '').toString();
-      if (ref.isNotEmpty) _pendingAttachments.add(ref);
+      final ref = result.path;
+      if (ref.isNotEmpty) {
+        _pendingAttachments.add(ref);
+        final copy = Uint8List.fromList(bytes);
+        _attachmentDetails[ref] = PendingAttachment(ref: ref, filename: filename,
+            sizeBytes: bytes.length, bytes: copy);
+        // Retain the bytes under the staged path: that is how the stored
+        // transcript will name this image, and a phone cannot fetch a gateway
+        // path, so this copy is what lets the user's own photo appear in the
+        // conversation instead of a placeholder.
+        AttachmentCache.put(ref, copy);
+      }
       _notify();
       return ref;
     } catch (e) {
       _notify();
-      return _shortError(e);
+      final error = _shortError(e);
+      _fail(error);
+      return error;
     }
   }
 
@@ -2718,7 +2826,11 @@ class ChatStore extends ChangeNotifier {
       final ref =
           (res['ref_text'] ?? res['ref'] ?? res['path'] ?? res['name'] ?? '')
               .toString();
-      if (ref.isNotEmpty) _pendingAttachments.add(ref);
+      if (ref.isNotEmpty) {
+        _pendingAttachments.add(ref);
+        _attachmentDetails[ref] = PendingAttachment(ref: ref, filename: name,
+            sizeBytes: bytes.length);
+      }
       _notify();
       return ref;
     } catch (e) {
@@ -2732,9 +2844,14 @@ class ChatStore extends ChangeNotifier {
   /// File refs (`@file:...`) are local-only since the staged file persists in
   /// the workspace.
   Future<void> detachAttachment(String ref) async {
+    if (_sending) return;
+    if (_queuedImages.remove(ref) != null) {
+      _notify();
+      return;
+    }
     if (ref.startsWith('@file:')) {
       // File refs: local removal only; staged file persists in workspace.
-      _pendingAttachments.remove(ref);
+      _removeAttachment(ref);
       _notify();
       return;
     }
@@ -2742,10 +2859,7 @@ class ChatStore extends ChangeNotifier {
     final sid = _activeSessionId;
     if (sid != null && sid.isNotEmpty) {
       try {
-        await _client.request('image.detach', {
-          'session_id': sid,
-          'path': ref,
-        });
+        await ImageAttachmentService(_client, sessionId: sid).detach(ref);
       } catch (_) {
         // Gateway failed — keep the chip so the user can retry.
         _fail('Could not detach image');
@@ -2753,7 +2867,7 @@ class ChatStore extends ChangeNotifier {
         return;
       }
     }
-    _pendingAttachments.remove(ref);
+    _removeAttachment(ref);
     _notify();
   }
 

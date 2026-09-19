@@ -5,18 +5,29 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../gateway/client.dart';
 import '../models/models.dart';
 import '../store/chat_store.dart';
 import '../app_scope.dart';
+import '../widgets/context_meter.dart';
 import '../widgets/message_bubble.dart';
+import '../widgets/attachment_strip.dart';
+import '../media/image_attachment.dart';
 import 'settings_screen.dart';
+
+typedef PhoneImagePicker = Future<XFile?> Function(ImageSource source);
+
+Future<XFile?> _pickPhoneImage(ImageSource source) =>
+    ImagePicker().pickImage(source: source);
 
 /// Main connected surface: transcript + composer + session rail.
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, this.storeOverride});
+  const HomeScreen({super.key, this.storeOverride, this.imagePicker});
+
+  final PhoneImagePicker? imagePicker;
 
   /// Optional test seam: when non-null, bypasses [AppScope] and uses this
   /// store directly.  Production callers leave it null.
@@ -786,7 +797,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 _GoalBar(store: store),
                 _Composer(
                   controller: _input,
-                  canSend: store.connection == GwConnectionState.open,
+                  imagePicker: widget.imagePicker ?? _pickPhoneImage,
+                  canSend: store.connection == GwConnectionState.open &&
+                      !store.sendingAttachments,
                   streaming: store.streaming,
                   dirty: _composerDirty,
                   onSend: _send,
@@ -1210,7 +1223,7 @@ class _ChatAppbar extends StatelessWidget {
               onPressed: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => SettingsScreen(store: store),
+                    builder: (_) => SettingsScreen(store: store, configTransport: store.client.request),
                   ),
                 );
               },
@@ -1259,15 +1272,26 @@ class _ChatAppbar extends StatelessWidget {
                             // shrink instead of overflowing the row.
                             Flexible(
                               child: Tooltip(
-                                message: store.contextUsage.description ?? '',
-                                child: Text(
-                                  store.contextLabel!,
-                                  softWrap: false,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    fontSize: 10,
-                                    color: theme.colorScheme.onSurfaceVariant
-                                        .withValues(alpha: 0.75),
+                                // One compact reading fits here; the full
+                                // breakdown of what is filling the window opens
+                                // as a sheet, which is what turns a manual
+                                // compaction into a decision instead of a guess.
+                                message: (store.contextBreakdown?.hasData ??
+                                        false)
+                                    ? 'Tap for the context breakdown'
+                                    : (store.contextUsage.description ?? ''),
+                                child: InkWell(
+                                  onTap: () => _showContextMeter(context),
+                                  borderRadius: BorderRadius.circular(6),
+                                  child: Text(
+                                    store.contextLabel!,
+                                    softWrap: false,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      fontSize: 10,
+                                      color: theme.colorScheme.onSurfaceVariant
+                                          .withValues(alpha: 0.75),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -1374,6 +1398,28 @@ class _ChatAppbar extends StatelessWidget {
     );
   }
 
+  /// The app bar carries one compact reading; the meter explains what is
+  /// filling the window, category by category, against the model's window.
+  Future<void> _showContextMeter(BuildContext context) async {
+    // Fetched on open so the numbers are live, and only when asked for.
+    final breakdown = await store.loadContextBreakdown();
+    if (!context.mounted) return;
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: false,
+      builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        child: !breakdown.hasData
+            ? Text(
+                'No context breakdown reported by the gateway yet.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              )
+            : ContextMeter(breakdown: breakdown),
+      ),
+    );
+  }
+
   void _snack(BuildContext context, String text) {
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(text)));
@@ -1465,7 +1511,7 @@ class _ChatAppbar extends StatelessWidget {
                       Navigator.of(sheetContext).pop();
                       Navigator.of(context).push(
                         MaterialPageRoute(
-                          builder: (_) => SettingsScreen(store: store),
+                          builder: (_) => SettingsScreen(store: store, configTransport: store.client.request),
                         ),
                       );
                     },
@@ -1968,6 +2014,7 @@ class _Composer extends StatefulWidget {
     required this.streaming,
     required this.dirty,
     required this.canSend,
+    required this.imagePicker,
     required this.store,
   });
   final TextEditingController controller;
@@ -1976,6 +2023,7 @@ class _Composer extends StatefulWidget {
   final bool streaming;
   final bool dirty;
   final bool canSend;
+  final PhoneImagePicker imagePicker;
   final ChatStore store;
 
   @override
@@ -2062,13 +2110,32 @@ class _ComposerState extends State<_Composer> {
     _clearSlash();
   }
 
-  Future<void> _attachImage() async {
-    final files = await FilePicker.pickFiles(type: FileType.image);
-    if (files.isEmpty) return;
-    final f = files.first;
-    final bytes = await f.readAsBytes();
-    final name = f.name.isEmpty ? 'image.png' : f.name;
-    await store.attachImageBytes(bytes, filename: name);
+  bool _pickingImage = false;
+
+  Future<void> _attachImage(ImageSource source) async {
+    if (_pickingImage) return;
+    setState(() => _pickingImage = true);
+    final target = store;
+    final session = target.activeSessionId;
+    try {
+      final file = await widget.imagePicker(source);
+      if (file == null) return;
+      // Check before reading so a huge original is never loaded just to reject it.
+      if (await file.length() > ImageAttachmentService.maxBytes) {
+        throw GatewayError('Image is too large. The gateway limit is 25 MiB.');
+      }
+      final bytes = await file.readAsBytes();
+      if (!mounted || target != store || session != target.activeSessionId) return;
+      target.queueImage(bytes, filename: file.name.isEmpty ? 'image.png' : file.name);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(e is GatewayError ? e.message : 'Could not pick photo: $e'),
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _pickingImage = false);
+    }
   }
 
   Future<void> _attachFile() async {
@@ -2087,68 +2154,17 @@ class _ComposerState extends State<_Composer> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final pending = store.pendingAttachments;
     return ConsumerStore(
       store: store,
       builder: (context, store) {
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (pending.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
-                child: SizedBox(
-                  height: 44,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    children: pending.map((ref) {
-                      final label =
-                          ref.length > 32 ? '${ref.substring(0, 32)}…' : ref;
-                      return Container(
-                        margin: const EdgeInsets.only(right: 8),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                              color: theme.colorScheme.outlineVariant
-                                  .withValues(alpha: 0.6)),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              ref.startsWith('@file:')
-                                  ? Icons.insert_drive_file_outlined
-                                  : Icons.image_outlined,
-                              size: 16,
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                            const SizedBox(width: 6),
-                            Flexible(
-                                child: Text(label,
-                                    style: theme.textTheme.labelSmall?.copyWith(
-                                        color: theme
-                                            .colorScheme.onSurfaceVariant))),
-                            const SizedBox(width: 4),
-                            IconButton(
-                              tooltip: 'Remove attachment',
-                              visualDensity: VisualDensity.compact,
-                              constraints: const BoxConstraints(
-                                  minWidth: 32, minHeight: 32),
-                              iconSize: 16,
-                              icon: const Icon(Icons.close_rounded),
-                              color: theme.colorScheme.onSurfaceVariant,
-                              onPressed: () => store.detachAttachment(ref),
-                            ),
-                          ],
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ),
-              ),
+            AttachmentStrip(
+              attachments: store.attachmentDetails,
+              enabled: !store.sendingAttachments,
+              onRemove: (ref) => unawaited(store.detachAttachment(ref)),
+            ),
             if (_slashActive)
               _SlashMenu(
                 items: _slashItems,
@@ -2162,15 +2178,27 @@ class _ComposerState extends State<_Composer> {
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    IconButton(
-                      tooltip: 'Attach image',
-                      icon: const Icon(Icons.image_outlined),
-                      onPressed: _attachImage,
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: 'Attach image',
+                          icon: const Icon(Icons.image_outlined),
+                          onPressed: _pickingImage || store.sendingAttachments
+                              ? null : () => _attachImage(ImageSource.gallery),
+                        ),
+                        IconButton(
+                          tooltip: 'Take photo',
+                          icon: const Icon(Icons.camera_alt_outlined),
+                          onPressed: _pickingImage || store.sendingAttachments
+                              ? null : () => _attachImage(ImageSource.camera),
+                        ),
+                      ],
                     ),
                     IconButton(
                       tooltip: 'Attach file',
                       icon: const Icon(Icons.attach_file),
-                      onPressed: _attachFile,
+                      onPressed: store.sendingAttachments ? null : _attachFile,
                     ),
                     IconButton(
                       tooltip:

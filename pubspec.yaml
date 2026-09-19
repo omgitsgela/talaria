@@ -4,7 +4,7 @@ publish_to: 'none'
 # Version convention (2026-09-11 round): major.minor = feature rounds;
 # +code = every APK build, bumped monotonically. lib/src/app_version.dart
 # mirrors these values for the UI — keep the two in lockstep.
-version: 1.2.6+35
+version: 1.2.7+36
 
 environment:
   # Pinned exactly, and deliberately: the Android build templates, AGP/Kotlin
@@ -31,6 +31,7 @@ dependencies:
   # (8.x hardcodes compileSdk 34; 11.x applies KGP which Flutter 3.47 can't
   # resolve. 12.x needs win32 ^6 -> flutter_secure_storage 11 -> compileSdk 37.)
   file_picker: ^12.2.0
+  image_picker: ^1.2.3
   flutter_markdown_plus: ^1.0.12
 
 dev_dependencies:
