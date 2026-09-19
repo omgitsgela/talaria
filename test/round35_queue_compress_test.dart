@@ -65,6 +65,11 @@ class R35Gateway extends GatewayClient {
     }
   }
 
+  /// Push a gateway event as the active session ('live-a', see _readyStore).
+  void emit(String type, Map<String, dynamic> data,
+          {String sid = 'live-a'}) =>
+      pushed.add(GatewayEvent(type: type, sessionId: sid, payload: data));
+
   @override
   Future<void> dispose() async {
     await pushed.close();
@@ -94,9 +99,38 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('issue #2: /queue forces queue mode', () {
-    test('/queue submits with queued:true', () async {
+    // Superseded by the client-side queue (round 41): /queue now holds the
+    // message in the APP so it can be edited or dropped before it runs, and the
+    // message is only submitted when the running turn ends. What this test
+    // exists to protect - that a queued message is never applied as a live
+    // correction - is asserted on that submission instead.
+    test('/queue holds the message in the app while a turn runs', () async {
       final (gw, store) = await _readyStore(null);
       addTearDown(store.dispose);
+      await store.send('a turn is already running');
+      gw.responses['slash.exec'] = {
+        'type': 'send',
+        'message': 'focus on the brake pad depth',
+        'output': '',
+        'notice': '',
+      };
+      final before = gw.submits.length;
+      await store.execSlashDispatch('/queue focus on the brake pad depth');
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(gw.submits, hasLength(before),
+          reason: 'a queued message is not sent while the turn runs');
+      expect(store.queuedPrompts.map((q) => q.text),
+          contains('focus on the brake pad depth'),
+          reason: 'it waits in the app, where it can still be edited');
+      expect(store.statusLine.toLowerCase(), contains('queued'));
+    });
+
+    test('the queued message is submitted with queued:true when the turn ends',
+        () async {
+      final (gw, store) = await _readyStore(null);
+      addTearDown(store.dispose);
+      await store.send('a turn is already running');
       gw.responses['slash.exec'] = {
         'type': 'send',
         'message': 'focus on the brake pad depth',
@@ -106,15 +140,21 @@ void main() {
       await store.execSlashDispatch('/queue focus on the brake pad depth');
       await Future<void>.delayed(const Duration(milliseconds: 20));
 
-      expect(gw.submits, hasLength(1), reason: 'one prompt.submit expected');
-      expect(gw.submits.single['queued'], true,
-          reason: '/queue must pass queued:true so the gateway force-queues '
-              'instead of redirecting/steering');
+      gw.emit('message.complete', {'text': 'done'});
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      final queued = gw.submits.where((s) => s['queued'] == true).toList();
+      expect(queued, hasLength(1),
+          reason: 'the drained message must still force queue mode so it can '
+              'never become a live correction');
+      expect(queued.single['text'], 'focus on the brake pad depth');
     });
 
-    test('/q (alias) also submits with queued:true', () async {
+    test('/q (alias) queues the same way', () async {
       final (gw, store) = await _readyStore(null);
       addTearDown(store.dispose);
+      gw.emit('message.start', {});
+      gw.emit('message.delta', {'text': 'a turn is running'});
       gw.responses['slash.exec'] = {
         'type': 'send',
         'message': 'run the diagnostics',
@@ -124,8 +164,9 @@ void main() {
       await store.execSlashDispatch('/q run the diagnostics');
       await Future<void>.delayed(const Duration(milliseconds: 20));
 
-      expect(gw.submits.single['queued'], true,
-          reason: '/q is an alias of /queue and must force queue mode too');
+      expect(store.queuedPrompts.map((q) => q.text),
+          contains('run the diagnostics'),
+          reason: '/q is an alias of /queue');
     });
 
     test('a plain mid-turn send does NOT set queued', () async {

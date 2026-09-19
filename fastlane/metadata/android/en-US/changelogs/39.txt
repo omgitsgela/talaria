@@ -1,0 +1,3 @@
+* Queued messages now show above the composer, so you can see what is waiting for the next turn.
+* Each queued message can be edited, sent immediately, or dropped before it runs.
+* The queue survives closing the app, and a message that fails to send stays queued instead of being lost.

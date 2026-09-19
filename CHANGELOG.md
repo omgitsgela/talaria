@@ -3,6 +3,19 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.3.0
+
+### build 39
+- **Queued messages are visible, editable and droppable.** `/queue` (and `/q`) used to hand the message
+  straight to the gateway, which keeps one queued prompt and offers no way to see or change it, so it
+  had already committed by the time you wanted to fix a typo. Queued messages are now held by the app:
+  a strip above the composer shows what is waiting, labelled "Queued for the next turn", and each entry
+  can be edited in place (loading it into the composer, where sending updates it instead of starting a
+  turn), sent immediately, or dropped. Clearing the composer while editing drops it too. The queue is
+  saved, so closing the app does not lose it, and a send that fails leaves the message queued rather
+  than losing what you wrote. When the running turn ends the next queued message goes out with queue
+  mode forced, so it still can never become a live correction of a running turn. (#17)
+
 ## 1.2.9
 
 ### build 38

@@ -14,6 +14,7 @@ import '../store/chat_store.dart';
 import '../app_scope.dart';
 import '../widgets/context_meter.dart';
 import '../widgets/message_bubble.dart';
+import '../widgets/queued_prompt_strip.dart';
 import '../widgets/attachment_strip.dart';
 import '../media/image_attachment.dart';
 import 'settings_screen.dart';
@@ -2179,6 +2180,37 @@ class _ComposerState extends State<_Composer> {
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            QueuedPromptStrip(
+              prompts: store.queuedPrompts,
+              editingId: store.editingQueuedId,
+              onToggleEdit: (q) {
+                if (store.editingQueuedId == q.id) {
+                  store.cancelQueuedEdit();
+                  widget.controller.clear();
+                } else {
+                  // Load it into the composer: sending then UPDATES this entry
+                  // rather than starting a turn (see ChatStore.send).
+                  store.beginQueuedEdit(q.id);
+                  widget.controller.text = q.text;
+                  widget.controller.selection =
+                      TextSelection.collapsed(offset: q.text.length);
+                }
+              },
+              onRemove: (id) {
+                if (store.editingQueuedId == id) {
+                  store.cancelQueuedEdit();
+                  widget.controller.clear();
+                }
+                store.removeQueuedPrompt(id);
+              },
+              onSendNow: (id) {
+                if (store.editingQueuedId == id) {
+                  store.cancelQueuedEdit();
+                  widget.controller.clear();
+                }
+                unawaited(store.sendQueuedPromptNow(id));
+              },
+            ),
             AttachmentStrip(
               attachments: store.attachmentDetails,
               enabled: !store.sendingAttachments,

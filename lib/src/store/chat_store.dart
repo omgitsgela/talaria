@@ -1003,6 +1003,8 @@ class ChatStore extends ChangeNotifier {
     notifyListeners();
     try {
       await _client.connect();
+      // Restore anything queued before the app closed.
+      unawaited(_loadQueuedPrompts());
       // Pull the session roster for the picker, then start on a FRESH
       // conversation by default. The old behavior auto-resumed the most
       // recent stored session, which made the app open to a stale
@@ -1663,6 +1665,10 @@ class ChatStore extends ChangeNotifier {
       _streaming = false;
       _statusLine = '';
       _compacting = false;
+      // The turn is over: anything the user queued for "after this one" runs
+      // now. One attempt per turn end, so a failure leaves the message queued
+      // and visible rather than losing it.
+      unawaited(_drainQueuedPrompts());
       // The turn is over — refresh the authoritative dot state so the
       // sidebar shows idle (best-effort; sessions.changed covers it too).
       unawaited(reconcileActiveTurnStatus());
@@ -2335,6 +2341,21 @@ class ChatStore extends ChangeNotifier {
   /// (gateway `session_auto_continue._handle_busy_submit`). A plain mid-turn
   /// send (no flag) keeps the session's busy mode, like the desktop.
   Future<bool> send(String text, {bool asQueue = false}) async {
+    // A send made while a queued message is loaded for editing UPDATES that
+    // entry instead of starting a turn. This is what "change it before it
+    // commits" means in practice: the message was never sent, so there is
+    // nothing to retract. Clearing the box drops the entry.
+    final editingQueued = _editingQueuedId;
+    if (editingQueued != null) {
+      _editingQueuedId = null;
+      final edited = text.trim();
+      if (edited.isEmpty) {
+        removeQueuedPrompt(editingQueued);
+      } else {
+        updateQueuedPrompt(editingQueued, edited);
+      }
+      return true;
+    }
     if (_sending) return false;
     _sending = true;
     _notify();
@@ -2618,7 +2639,13 @@ class ChatStore extends ChangeNotifier {
             .toLowerCase();
         final isQueueDirective =
             d.type == 'send' && (head == '/queue' || head == '/q');
-        await send(msg, asQueue: isQueueDirective);
+        if (isQueueDirective) {
+          // Held by the app, not the gateway: it is editable and droppable
+          // until the running turn ends, which is what /queue is for.
+          enqueuePrompt(msg);
+          break;
+        }
+        await send(msg);
         break;
       case 'prefill':
         final msg = d.message.trim();
@@ -2650,6 +2677,162 @@ class ChatStore extends ChangeNotifier {
   final List<String> _pendingAttachments = [];
   final Map<String, PendingAttachment> _attachmentDetails = {};
   final Map<String, PendingAttachment> _queuedImages = {};
+
+  /// Messages waiting to run after the current turn, oldest first.
+  final List<QueuedPrompt> _queuedPrompts = [];
+
+  /// The queue as the UI shows it: everything not yet sent.
+  List<QueuedPrompt> get queuedPrompts => List.unmodifiable(_queuedPrompts);
+
+  static const String _queuedPrefsKey = 'queued_prompts_v1';
+  bool _drainingQueued = false;
+
+  /// The queued message currently loaded into the composer for editing. Owned
+  /// here rather than by the screen so EVERY send path honours it: a send made
+  /// while this is set updates that entry instead of starting a turn.
+  String? _editingQueuedId;
+  String? get editingQueuedId => _editingQueuedId;
+
+  void beginQueuedEdit(String id) {
+    if (_editingQueuedId == id) return;
+    _editingQueuedId = id;
+    _notify();
+  }
+
+  void cancelQueuedEdit() {
+    if (_editingQueuedId == null) return;
+    _editingQueuedId = null;
+    _notify();
+  }
+
+  /// Queue [text] to run after the current turn instead of submitting it now.
+  ///
+  /// The message is held here, not by the gateway, so it is editable and
+  /// droppable until the running turn ends. A queue made while nothing is
+  /// running drains immediately (see [_drainQueuedPrompts]).
+  void enqueuePrompt(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+    _queuedPrompts.add(QueuedPrompt(
+      id: 'q${DateTime.now().microsecondsSinceEpoch}',
+      text: trimmed,
+      sessionId: _activeSessionId ?? '',
+    ));
+    _statusLine = 'Queued for the next turn';
+    unawaited(_persistQueuedPrompts());
+    _notify();
+    unawaited(_drainQueuedPrompts());
+  }
+
+  /// Change a queued message before it runs.
+  void updateQueuedPrompt(String id, String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+    for (final q in _queuedPrompts) {
+      if (q.id != id) continue;
+      if (q.text == trimmed) return;
+      q.text = trimmed;
+      _statusLine = 'Queued message updated';
+      unawaited(_persistQueuedPrompts());
+      _notify();
+      return;
+    }
+  }
+
+  /// Drop a queued message without sending it.
+  void removeQueuedPrompt(String id) {
+    final before = _queuedPrompts.length;
+    _queuedPrompts.removeWhere((q) => q.id == id);
+    if (_queuedPrompts.length == before) return;
+    _statusLine = '';
+    unawaited(_persistQueuedPrompts());
+    _notify();
+  }
+
+  /// Send a queued message now rather than waiting for the turn to end.
+  ///
+  /// Put back at the head of the queue when the send fails, so nothing the user
+  /// wrote is lost.
+  Future<bool> sendQueuedPromptNow(String id) async {
+    final i = _queuedPrompts.indexWhere((q) => q.id == id);
+    if (i < 0) return false;
+    final q = _queuedPrompts.removeAt(i);
+    unawaited(_persistQueuedPrompts());
+    _notify();
+    final sent = await send(q.text);
+    if (!sent) {
+      _queuedPrompts.insert(0, q);
+      unawaited(_persistQueuedPrompts());
+      _notify();
+    }
+    return sent;
+  }
+
+  /// Send the oldest queued message once the turn that was running has ended.
+  ///
+  /// One attempt per turn end, which is what bounds the retries: a send that
+  /// fails (offline, gateway gone, session not live) leaves the message queued
+  /// and visible, and the next completed turn tries again.
+  Future<void> _drainQueuedPrompts() async {
+    if (_drainingQueued) return;
+    if (_streaming || _queuedPrompts.isEmpty) return;
+    if (_client.state != GwConnectionState.open) return;
+    _drainingQueued = true;
+    try {
+      final q = _queuedPrompts.first;
+      _queuedPrompts.removeAt(0);
+      unawaited(_persistQueuedPrompts());
+      _notify();
+      // `asQueue: true` keeps the guarantee issue #2 was about: a message the
+      // user queued for "after this turn" must never be applied as a live
+      // correction of a turn that is somehow still running (another client, a
+      // turn the app has not seen end). The flag is inert on an idle session.
+      final sent = await send(q.text, asQueue: true);
+      if (!sent) {
+        _queuedPrompts.insert(0, q);
+        unawaited(_persistQueuedPrompts());
+        _notify();
+      }
+    } finally {
+      _drainingQueued = false;
+    }
+  }
+
+  Future<void> _persistQueuedPrompts() async {
+    try {
+      final prefs = await _prefs();
+      await prefs.setString(_queuedPrefsKey,
+          jsonEncode([for (final q in _queuedPrompts) q.toJson()]));
+    } catch (_) {
+      // Best effort: the in-memory queue is the source of truth.
+    }
+  }
+
+  /// Restore the queue across app restarts, so a message queued before the app
+  /// closed is not silently lost.
+  Future<void> _loadQueuedPrompts() async {
+    try {
+      final prefs = await _prefs();
+      final raw = prefs.getString(_queuedPrefsKey);
+      if (raw == null || raw.isEmpty) return;
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return;
+      final restored = <QueuedPrompt>[];
+      for (final item in decoded) {
+        if (item is Map) {
+          final q = QueuedPrompt.fromJson(item.cast<String, dynamic>());
+          if (q != null) restored.add(q);
+        }
+      }
+      if (restored.isEmpty) return;
+      _queuedPrompts
+        ..clear()
+        ..addAll(restored);
+      _notify();
+    } catch (_) {
+      // A corrupt entry must not stop startup.
+    }
+  }
   int _imageSequence = 0;
   bool _sending = false;
   bool get sendingAttachments => _sending;

@@ -489,6 +489,47 @@ List<String> fetchableImageSources(Object? result, {int depth = 0}) {
   return found;
 }
 
+/// A message the user queued to run after the current turn.
+///
+/// Held by the CLIENT rather than handed to the gateway, and that is the whole
+/// point: the gateway keeps one queued prompt and offers no way to change it,
+/// while a message that lives here has not committed anywhere yet, so it can be
+/// edited or dropped before the running turn ends and it is sent. Mirrors the
+/// desktop's composer queue, which persists its entries for the same reason.
+class QueuedPrompt {
+  QueuedPrompt({
+    required this.id,
+    required this.text,
+    this.sessionId = '',
+    double? queuedAt,
+  }) : queuedAt =
+            queuedAt ?? DateTime.now().millisecondsSinceEpoch.toDouble();
+
+  final String id;
+  String text;
+
+  /// The conversation it belongs to, so a queue survives switching away and
+  /// back. Empty means it belongs to whatever session is active when it drains.
+  String sessionId;
+  double queuedAt;
+
+  Map<String, dynamic> toJson() =>
+      {'id': id, 'text': text, 'session': sessionId, 'at': queuedAt};
+
+  static QueuedPrompt? fromJson(Map<String, dynamic> j) {
+    final id = (j['id'] ?? '').toString();
+    final text = (j['text'] ?? '').toString();
+    if (id.isEmpty || text.trim().isEmpty) return null;
+    final at = j['at'];
+    return QueuedPrompt(
+      id: id,
+      text: text,
+      sessionId: (j['session'] ?? '').toString(),
+      queuedAt: at is num ? at.toDouble() : null,
+    );
+  }
+}
+
 class ModelOption {
   const ModelOption({
     required this.slug,
