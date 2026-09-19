@@ -1,11 +1,17 @@
 # Talaria
 
+[![Latest release](https://img.shields.io/github/v/release/omgitsgela/talaria?label=latest%20release&color=2f81f7)](https://github.com/omgitsgela/talaria/releases/latest)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
 **Your gateway, in your pocket.**
 
-Talaria is a mobile app for a self-hosted [Hermes Agent](https://hermes-agent.nousresearch.com/docs)
-gateway running in remote gateway mode. It puts the conversations, goals and tasks you already have
-on your desktop onto your phone: read a reply as it streams, answer a question Hermes is waiting on,
-switch models, and pick up a conversation you started at your desk.
+**[Download the latest release](https://github.com/omgitsgela/talaria/releases/latest)** (Android 7.0
+or newer). Not on Google Play: see [Install on Android](#install-on-android).
+
+Talaria is a mobile app for a [Hermes Agent](https://hermes-agent.nousresearch.com/docs) gateway that
+you host yourself. It puts the conversations, goals and tasks you already have on your desktop onto
+your phone: read a reply as it streams, answer a question Hermes is waiting on, switch models, and
+pick up a conversation you started at your desk.
 
 It talks to a gateway you control, not to a service of ours. There is no account to create and
 nothing is sent anywhere else.
@@ -46,13 +52,19 @@ This is an unofficial companion. It is not affiliated with or endorsed by Nous R
 
 ## What you need
 
-- A Hermes Agent gateway you can reach from your phone. If you do not have one running yet, start
-  with the [Hermes Agent documentation](https://hermes-agent.nousresearch.com/docs).
-- A way to authenticate to that gateway: a session or bearer token, or the gateway's own OAuth sign
-  in if it is enabled.
+- A Hermes Agent gateway you can reach from your phone: the Hermes **dashboard** server
+  (`hermes dashboard`), bound to an address your phone can reach and with an authentication provider
+  configured. [Setting one up](docs/GATEWAY-SETUP.md) walks through it, including the check that
+  tells you it is reachable before you open the app.
+- A way to authenticate to that gateway. Talaria signs in through your phone's browser, and also
+  accepts a bearer or session token if you prefer.
 - An Android phone running **Android 7.0 or newer**.
 
 ## Reaching your gateway
+
+Setting the gateway up, in short: run `hermes dashboard --host 0.0.0.0`, give it a username and
+password (or an OAuth provider), check `http://YOUR-ADDRESS:9119/api/status` from your phone, then
+sign in from the app. [Full instructions](docs/GATEWAY-SETUP.md).
 
 Talaria talks to your gateway over a network you already have. There is no relay, no account, and
 nothing of ours in the middle, so the only question is how your phone gets to that address. In
@@ -114,9 +126,9 @@ matches:
 
 | Field | When it applies |
 |---|---|
-| **Session token** | The `X-Hermes-Session-Token` value your gateway dashboard shows. This is what loopback or `--insecure` gateways use. |
-| **Bearer token** | An OAuth bearer token, used by gated or publicly reachable gateways. |
-| **Sign in with Hermes** | Offered on the OAuth tab when your gateway advertises the native flow. It opens your system browser and Talaria catches the callback, then stores the token on the device. The bearer field stays available beside it, so a token minted elsewhere is still a way in. |
+| **Sign in with Hermes** | The normal path. Offered whenever your gateway advertises its native sign-in flow, which it does for both a username-and-password and an OAuth provider. The sign-in opens your phone's real browser, so password managers and passkeys work, and the app stores the token it receives in Android's Keystore-backed storage. |
+| **Bearer token** | A token you minted elsewhere, for a gateway that expects one. Useful on a shared or hosted gateway, and it stays available beside the sign-in button. |
+| **Session token** | The gateway's `X-Hermes-Session-Token`, which exists for loopback and `--insecure` gateways. It is short-lived and tied to one server run, so it is the fallback rather than the way to connect a phone. |
 
 Tap **Connect**. When it works you land on the conversation view, and Talaria remembers the address
 and token so you only do this once per gateway. Your credentials are kept in Android's Keystore
@@ -284,14 +296,21 @@ your device and you decide where it goes: the app itself never sends anything an
 
 ## Troubleshooting
 
-**It will not connect.** Check the address and port, confirm the gateway is running in remote
-gateway mode, and check that you can open that address in your phone's browser. If you are away from
-home, the gateway has to be reachable somehow: see [Reaching your gateway](#reaching-your-gateway)
-for the private-network and hosted options. If your gateway requires OAuth, use the sign in option,
-or paste a bearer token you already have.
+**It will not connect.** Open the same address in your phone's browser first. If that fails, the
+problem is the network, not the app: the dashboard may not be running, may be bound to `127.0.0.1`
+so only the machine it runs on can reach it, or a firewall may be in the way. If the browser reaches
+it but the app does not, check `/api/status` there for `auth_required: true` and a provider, and see
+[Setting up a gateway](docs/GATEWAY-SETUP.md).
 
-**The token is rejected.** Session tokens and bearer tokens are different things and are not
-interchangeable. Make sure you copied the value your gateway expects for the field you are using.
+**It connects, then shows nothing, or drops straight away.** That is usually the WebSocket rather
+than the address, and the gateway's own log names the reason: close code `4403` means the address you
+entered does not match the host the dashboard is bound to, and `4401` means the sign-in did not
+authenticate. Using the exact address the dashboard was started with fixes the first case.
+
+**The token is rejected.** Sign in instead if your gateway offers it, since that path is the one the
+gateway advertises. Session tokens and bearer tokens are different things and are not
+interchangeable, so if you are pasting one, make sure it is the value that belongs in the field you
+are using.
 
 **Android will not install the APK.** Enable installs from your browser or file manager when the
 prompt offers the shortcut, then tap Install again. Android refuses to replace an installed app with
