@@ -10,6 +10,7 @@ import '../gateway/http_service.dart';
 import '../gateway/native_oauth.dart';
 import '../gateway/oauth_flow.dart';
 import '../media/image_attachment.dart';
+import '../models/context_breakdown.dart';
 import '../models/context_usage.dart';
 import '../models/goal_status.dart';
 import '../models/models.dart';
@@ -285,8 +286,22 @@ class ChatStore extends ChangeNotifier {
   ContextUsage _context = ContextUsage.unknown;
   ContextUsage get contextUsage => _context;
 
+  /// Full breakdown (category slices plus the model window) behind the
+  /// context meter. Null until a reading arrives, so the meter renders
+  /// nothing rather than inventing a bar.
+  ContextBreakdown? _breakdown;
+
   /// Compact app-bar label (`24.5k/128k`), or null when unknown.
   String? get contextLabel => _context.label;
+
+  /// The breakdown behind the meter, or null when the gateway has not
+  /// reported one.
+  ContextBreakdown? get contextBreakdown => _breakdown;
+
+  /// The live gateway client. A screen that needs a one-off config call
+  /// reuses this socket instead of opening a second connection to the
+  /// same gateway.
+  GatewayClient get client => _client;
 
   /// The gateway reports usage in two shapes: nested under `usage` on
   /// `session.info` and `message.complete`, and flat on a `session.usage`
@@ -315,6 +330,34 @@ class ChatStore extends ChangeNotifier {
       }
     } catch (_) {
       // Best-effort; the event sources fill this in on the next turn.
+    }
+  }
+
+  /// Reads the category breakdown on demand. The sheet that shows it is the
+  /// only consumer, so the ordinary turn path makes no extra round trip and a
+  /// gateway that does not expose the method simply yields an empty meter.
+  Future<ContextBreakdown> loadContextBreakdown() async {
+    final sid = _activeSessionId;
+    if (sid == null ||
+        sid.isEmpty ||
+        _client.state != GwConnectionState.open) {
+      return _breakdown ?? ContextBreakdown.empty;
+    }
+    try {
+      final raw =
+          await _client.request('session.context_breakdown', {'session_id': sid});
+      if (_disposed || _activeSessionId != sid) {
+        return _breakdown ?? ContextBreakdown.empty;
+      }
+      final next = ContextBreakdown.fromPayload(raw);
+      if (next.hasData || _breakdown != null) {
+        _breakdown = next;
+        _notify();
+      }
+      return next;
+    } catch (_) {
+      // An empty meter beats a guessed one.
+      return _breakdown ?? ContextBreakdown.empty;
     }
   }
 

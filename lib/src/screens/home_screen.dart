@@ -12,6 +12,7 @@ import '../gateway/client.dart';
 import '../models/models.dart';
 import '../store/chat_store.dart';
 import '../app_scope.dart';
+import '../widgets/context_meter.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/attachment_strip.dart';
 import '../media/image_attachment.dart';
@@ -1222,7 +1223,7 @@ class _ChatAppbar extends StatelessWidget {
               onPressed: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => SettingsScreen(store: store),
+                    builder: (_) => SettingsScreen(store: store, configTransport: store.client.request),
                   ),
                 );
               },
@@ -1271,15 +1272,26 @@ class _ChatAppbar extends StatelessWidget {
                             // shrink instead of overflowing the row.
                             Flexible(
                               child: Tooltip(
-                                message: store.contextUsage.description ?? '',
-                                child: Text(
-                                  store.contextLabel!,
-                                  softWrap: false,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: theme.textTheme.bodySmall?.copyWith(
-                                    fontSize: 10,
-                                    color: theme.colorScheme.onSurfaceVariant
-                                        .withValues(alpha: 0.75),
+                                // One compact reading fits here; the full
+                                // breakdown of what is filling the window opens
+                                // as a sheet, which is what turns a manual
+                                // compaction into a decision instead of a guess.
+                                message: (store.contextBreakdown?.hasData ??
+                                        false)
+                                    ? 'Tap for the context breakdown'
+                                    : (store.contextUsage.description ?? ''),
+                                child: InkWell(
+                                  onTap: () => _showContextMeter(context),
+                                  borderRadius: BorderRadius.circular(6),
+                                  child: Text(
+                                    store.contextLabel!,
+                                    softWrap: false,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      fontSize: 10,
+                                      color: theme.colorScheme.onSurfaceVariant
+                                          .withValues(alpha: 0.75),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -1386,6 +1398,28 @@ class _ChatAppbar extends StatelessWidget {
     );
   }
 
+  /// The app bar carries one compact reading; the meter explains what is
+  /// filling the window, category by category, against the model's window.
+  Future<void> _showContextMeter(BuildContext context) async {
+    // Fetched on open so the numbers are live, and only when asked for.
+    final breakdown = await store.loadContextBreakdown();
+    if (!context.mounted) return;
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: false,
+      builder: (_) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        child: !breakdown.hasData
+            ? Text(
+                'No context breakdown reported by the gateway yet.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              )
+            : ContextMeter(breakdown: breakdown),
+      ),
+    );
+  }
+
   void _snack(BuildContext context, String text) {
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(text)));
@@ -1477,7 +1511,7 @@ class _ChatAppbar extends StatelessWidget {
                       Navigator.of(sheetContext).pop();
                       Navigator.of(context).push(
                         MaterialPageRoute(
-                          builder: (_) => SettingsScreen(store: store),
+                          builder: (_) => SettingsScreen(store: store, configTransport: store.client.request),
                         ),
                       );
                     },

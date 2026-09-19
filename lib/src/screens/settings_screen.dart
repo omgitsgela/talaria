@@ -8,7 +8,6 @@ import 'package:url_launcher/url_launcher.dart';
 import '../diagnostics/error_report.dart';
 
 import '../app_version.dart';
-import '../gateway/client.dart';
 import '../models/models.dart';
 import '../models/reasoning_effort.dart';
 import '../store/chat_store.dart';
@@ -960,7 +959,6 @@ class _ReasoningEffortCard extends StatefulWidget {
 
 class _ReasoningEffortCardState extends State<_ReasoningEffortCard> {
   ConfigTransport? _transport;
-  GatewayClient? _ownedClient;
   ReasoningEffort? _effort;
   bool _loading = true;
   bool _busy = false;
@@ -972,26 +970,14 @@ class _ReasoningEffortCardState extends State<_ReasoningEffortCard> {
     unawaited(_load());
   }
 
-  @override
-  void dispose() {
-    final client = _ownedClient;
-    _ownedClient = null;
-    if (client != null) unawaited(client.dispose());
-    super.dispose();
-  }
-
   Future<ConfigTransport> _resolveTransport() async {
     final injected = widget.transport;
     if (injected != null) return injected;
-    final client = GatewayClient(widget.store.config, autoReconnect: false);
-    try {
-      await client.connect();
-    } catch (_) {
-      await client.dispose();
-      rethrow;
-    }
-    _ownedClient = client;
-    return client.request;
+    // The enclosing screen owns the gateway connection and passes it in. A
+    // second socket dialled from here left a request (and its timeout timer)
+    // alive past this widget's disposal, so the missing transport is now an
+    // explicit failure instead of a hidden connection.
+    throw StateError('connect to the gateway first');
   }
 
   Future<void> _load() async {
@@ -1011,7 +997,7 @@ class _ReasoningEffortCardState extends State<_ReasoningEffortCard> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = '$e';
+        _error = widget.transport == null ? 'connect the app to the gateway first' : '$e';
         _loading = false;
       });
     }
