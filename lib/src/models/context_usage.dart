@@ -9,6 +9,12 @@
 /// context engine cannot report a real current occupancy (for example right
 /// after a compression, when it emits a -1 sentinel). An unknown reading must
 /// therefore stay unknown so the UI shows nothing rather than a fake 0%.
+///
+/// The `session.context_breakdown` reply carries the SAME `context_used` /
+/// `context_max` / `context_percent` keys on its top level, so a breakdown
+/// payload parses through the same [ContextUsage.fromUsage] path: the
+/// percentage here and the category breakdown never disagree about how the
+/// numbers are read.
 class ContextUsage {
   const ContextUsage({this.used, this.max, this.percent});
 
@@ -47,6 +53,12 @@ class ContextUsage {
     if (percent != null) percent = percent.clamp(0, 100);
     return ContextUsage(used: rawUsed, max: max, percent: percent);
   }
+
+  /// A `session.context_breakdown` reply carries the same occupancy keys at
+  /// its top level; this is [fromUsage], named so a call site that holds a
+  /// breakdown payload reads honestly.
+  factory ContextUsage.fromBreakdown(Map? breakdown) =>
+      ContextUsage.fromUsage(breakdown);
 
   /// Compact app-bar label: `24.5k/128k`, or just the used count when the
   /// window size is unknown. Null when there is nothing truthful to show.
