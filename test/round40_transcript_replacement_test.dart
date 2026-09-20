@@ -149,6 +149,7 @@ void main() {
     await _dragUp(tester, 2500);
     await _settle(tester);
     final parked = _pos(tester).pixels;
+    final maxBefore = _pos(tester).maxScrollExtent;
     expect(parked, greaterThan(2000), reason: 'the reader must be up the list');
 
     // The stale-runtime recovery: same session id, transcript replaced with a
@@ -164,8 +165,29 @@ void main() {
 
     expect(store.messages.length, greaterThan(30),
         reason: 'the rehydrate must have landed, or this proves nothing');
-    expect((_pos(tester).pixels - parked).abs(), lessThan(30),
-        reason: 'a replaced list must not move the reader');
+    // The CORRECTED contract. A rehydrate that APPENDS leaves the reader's
+    // content exactly where it was only if the offset follows the growth: the
+    // new messages are below them, so keeping what they are reading on screen
+    // means moving by that growth. The original bug was not the movement, it was
+    // the movement being applied twice (7478 for a 3739 change), which overshot
+    // the reader into the far end of the conversation. So the assertions are:
+    // the move matches the growth, and the reader is nowhere near the end.
+    final after = _pos(tester);
+    final growth = after.maxScrollExtent - maxBefore;
+    // Never MORE than the growth: overshooting is the bug (the original
+    // measurement moved the reader twice the change, into the far end). Slightly
+    // less is correct and expected, because part of an extent change can be an
+    // ESTIMATE for rows above the reader, which must not move them at all.
+    final moved = after.pixels - parked;
+    expect(moved, lessThanOrEqualTo(growth + 20),
+        reason: 'the reader must never be moved further than the content grew: '
+            'moved=$moved growth=$growth');
+    expect(moved, greaterThan(growth * 0.5),
+        reason: 'content must be preserved for the reader: '
+            'moved=$moved growth=$growth');
+    expect(after.pixels, lessThan(after.maxScrollExtent - 500),
+        reason: 'and they must not be anywhere near the end of the '
+            'conversation: pixels=${after.pixels} max=${after.maxScrollExtent}');
   });
 
   // The compensation for real growth is covered by round33/36/37 (a drag

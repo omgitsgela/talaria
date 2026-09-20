@@ -217,6 +217,10 @@ class _HomeScreenState extends State<HomeScreen> {
     // deliberate settle at the newest end (see [_onScrollEnd]).
     if (dragging) {
       _setStick(false);
+      // The finger is in charge of the position while it moves, so no
+      // compensation is wanted; tracking the extent here instead means the
+      // baseline is never older than where the reader has scrolled to.
+      _pinnedMaxExtent = pos.maxScrollExtent;
     }
     // Streaming-compensation (read-hold) arming: capture the extent ONCE, the
     // moment the user moves up from the newest end. From then on only the
@@ -287,7 +291,14 @@ class _HomeScreenState extends State<HomeScreen> {
       // re-baseline instead; the hold resumes on the next real growth.
       if (_seenTranscriptEpoch != s.transcriptEpoch) {
         _seenTranscriptEpoch = s.transcriptEpoch;
-        _pinnedMaxExtent = null;
+        // RE-BASELINE, do not wipe. A null reference silently disables the hold
+        // until the reader happens to scroll again, and a stale one flings them
+        // to the end of the conversation; the current extent is the only honest
+        // reference for content that has just been replaced.
+        if (_scroll.hasClients) {
+          final pos = _scroll.position;
+          _pinnedMaxExtent = pos.pixels <= 48 ? null : pos.maxScrollExtent;
+        }
         _lastReadIndex.remove(sid);
         _updateArrow();
         return;
@@ -325,8 +336,10 @@ class _HomeScreenState extends State<HomeScreen> {
       final np = _scroll.position;
       if (np.userScrollDirection == ScrollDirection.forward ||
           np.userScrollDirection == ScrollDirection.reverse) {
-        // Actively scrolling: do not fight the finger; the next scroll event
-        // refreshes the reference.
+        // Actively scrolling: do not fight the finger, but DO refresh the
+        // reference: a skipped compensation that leaves the old measurement
+        // behind is how the anchor goes stale.
+        _pinnedMaxExtent = np.maxScrollExtent;
         return;
       }
       final delta = np.maxScrollExtent - ref;
@@ -343,7 +356,20 @@ class _HomeScreenState extends State<HomeScreen> {
       // older content shrinking above the viewport does not move what is on
       // screen.
       if (delta < 0 && store.streaming) return;
-      final target = (np.pixels + delta).clamp(0.0, np.maxScrollExtent);
+      final target = np.pixels + delta;
+      if (target > np.maxScrollExtent + 0.5) {
+        // There is not enough room above the reader for the move that would
+        // keep their content in place, which means the delta is not real growth.
+        // It comes from a STALE baseline: `target > max` is equivalent to
+        // `pixels > ref`, so the measurement was taken when the extent was
+        // smaller than where the reader now is, and the difference has been
+        // accumulating. Clamping here lands them at maxScrollExtent, which in
+        // this reversed list is the OLDEST message: measured on a parked reader,
+        // 3600 -> 40843 in a transcript of 8107. That is the reported jump to
+        // the very beginning. Hold still and re-baseline instead: a reader whose
+        // content cannot be kept in place is still better off where they are.
+        return;
+      }
       if ((target - np.pixels).abs() > 0.5) {
         np.jumpTo(target);
       }

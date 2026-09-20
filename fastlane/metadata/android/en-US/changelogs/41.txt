@@ -1,0 +1,2 @@
+* Fixed: reading above the newest message could suddenly jump to the very beginning of the conversation when new content arrived.
+* Your reading position is now kept while a reply streams, and the view only moves by how much the conversation actually grew.

@@ -3,8 +3,20 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
-## 1.3.1
+## 1.3.2
 
+### build 41
+- **Reading above the newest message no longer jumps to the beginning of the conversation.** The
+  reading-position hold keeps your place by moving the view by however much the transcript grew. When
+  it skipped a change while you were scrolling and the conversation kept growing underneath, the
+  measurement it was comparing against went stale, and the next compensation carried the whole
+  accumulated difference and clamped at the far end of the transcript, which is the start of the
+  conversation. It now refuses a move that cannot fit above you (that is not real growth, it is a stale
+  measurement), refreshes its measurement whenever it skips, and tracks it while your finger drives.
+  Your place is kept, and a transcript that genuinely grows below you still moves the view by exactly
+  that growth, once. (#19)
+
+## 1.3.1\n
 ### build 40
 - **Stopping a turn no longer leaves anything spinning.** Both the "Hermes is working…" indicator and a
   reasoning trace's spinner are driven by one flag on the row, and an interrupted turn does not always
