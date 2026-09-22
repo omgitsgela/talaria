@@ -3,6 +3,27 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.3.3
+
+### build 42
+- **Conversations are grouped by where they came from.** A gateway keeps ONE session list and cannot
+  filter it, so your conversations sit in the same list as the cron jobs, subagent runs, and every
+  Telegram or API session. On a gateway in real use those outnumber human conversations several times
+  over (cron 927, Telegram 709, desktop 125, cli 71, subagent 64, tui 46, API 18 on this one), which
+  buries the conversations you actually had. Direct conversations stay in the roster under Pinned and
+  the time buckets; everything else is held back by default behind a filter above the list that says how
+  many are hidden. Turn it on to see them grouped by source, each row badged so a Telegram thread is
+  never mistaken for your own conversation. The choice is remembered per gateway. Pinning a session
+  always shows it, because a pin is an explicit act and outranks the category default. Only a source the
+  app positively recognises as non-human is ever hidden, so a platform it has never heard of stays
+  visible rather than vanishing. Search now also matches the platform name, so "telegram" or "api" finds
+  those conversations, and the roster pulls more history while saying so when it has hit the limit
+  instead of implying the list is complete. (#20)
+- **The version shown in the app was five builds out of date.** `kAppVersion` was left at 1.2.6 while
+  the pubspec moved to 1.3.2, so the splash, the About row and the bug-report header all reported the
+  wrong version. Now 1.3.3, and the comment says why it drifted unnoticed: the test pins the shape of
+  the label, not its value, so a version that simply never moves passes. (#21)
+
 ## 1.3.2
 
 ### build 41

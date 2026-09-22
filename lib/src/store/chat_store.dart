@@ -12,6 +12,7 @@ import '../gateway/oauth_flow.dart';
 import '../media/attachment_cache.dart';
 import '../media/image_attachment.dart';
 import '../models/context_breakdown.dart';
+import '../models/session_source.dart';
 import '../models/context_usage.dart';
 import '../models/goal_status.dart';
 import '../models/models.dart';
@@ -531,6 +532,38 @@ class ChatStore extends ChangeNotifier {
   /// True when the conversation with stored id [id] is pinned to the top.
   bool isPinned(String id) => _pinned.contains(id);
 
+  // ── Session categories (client-side display preference) ───────────
+  // The gateway keeps ONE session list and cannot filter it by source, so
+  // every client sees cron jobs, subagent runs, Telegram and API sessions
+  // mixed in with the conversations a person actually had. On a gateway in
+  // normal use those outnumber human conversations several times over, which
+  // is what buries the human ones. So the roster hides the recognised
+  // non-human sources by default and offers a way to show them.
+  //
+  // Same shape as the pin set: the store owns the pure flag and the
+  // segmentation logic (unit-testable, no SharedPreferences), and the
+  // sessions sheet owns persistence, keyed to the gateway host.
+  bool _showBackgroundSessions = false;
+  bool get showBackgroundSessions => _showBackgroundSessions;
+
+  /// Show or hide the recognised non-human conversations in the roster.
+  void setShowBackgroundSessions(bool value) {
+    if (_showBackgroundSessions == value) return;
+    _showBackgroundSessions = value;
+    notifyListeners();
+  }
+
+  /// How many rows the roster is currently holding back, for the toggle label.
+  /// Zero once they are being shown, because then nothing is held back. Pinned
+  /// rows are never held back, so they never count.
+  int hiddenBackgroundCount(List<SessionRow> sessions) {
+    if (_showBackgroundSessions) return 0;
+    return sessions
+        .where((s) =>
+            isBackgroundSessionSource(s.source) && !_pinned.contains(s.id))
+        .length;
+  }
+
   /// Add every id in [ids] to the pinned set (used to hydrate the in-memory
   /// set from the persisted prefs). Idempotent; notifies only on change.
   void applyPinned(Iterable<String> ids, {bool clear = false}) {
@@ -577,7 +610,13 @@ class ChatStore extends ChangeNotifier {
   /// first (most recent first, the gateway's own order), then one segment per
   /// time bucket in newest-first order (Today, Yesterday, This week, This
   /// month, Older), each preserving the gateway's most-recent-first order.
-  /// Pure and side-effect free — safe to call every build.
+  ///
+  /// Conversations from a recognised non-human source (cron, subagent runs,
+  /// Telegram, API callers, the rest of the platforms) are held back unless
+  /// [showBackgroundSessions] is on, in which case they follow the human
+  /// segments grouped by source label. A PINNED row is never held back: pinning
+  /// is an explicit act by the person using the app, so it outranks the
+  /// category default. Pure and side-effect free — safe to call every build.
   List<RosterSegment> segmentedSessions(List<SessionRow> sessions) {
     final pinnedRows = <SessionRow>[];
     final byBucket = <String, List<SessionRow>>{
@@ -587,9 +626,16 @@ class ChatStore extends ChangeNotifier {
       'This month': [],
       'Older': [],
     };
+    final byCategory = <String, List<SessionRow>>{};
     for (final s in sessions) {
       if (_pinned.contains(s.id)) {
         pinnedRows.add(s);
+        continue;
+      }
+      final category = sessionCategoryLabel(s.source);
+      if (category != null) {
+        if (!_showBackgroundSessions) continue;
+        byCategory.putIfAbsent(category, () => <SessionRow>[]).add(s);
         continue;
       }
       final bucket = _rosterTimeBucket(s.startedAt) ?? 'Older';
@@ -600,6 +646,14 @@ class ChatStore extends ChangeNotifier {
     for (final label in byBucket.keys) {
       final rows = byBucket[label]!;
       if (rows.isNotEmpty) out.add(RosterSegment(label, rows));
+    }
+    final labels = byCategory.keys.toList()
+      ..sort((a, b) {
+        final rank = sessionCategoryRank(a).compareTo(sessionCategoryRank(b));
+        return rank != 0 ? rank : a.compareTo(b);
+      });
+    for (final label in labels) {
+      out.add(RosterSegment(label, byCategory[label]!));
     }
     return out;
   }
@@ -1757,10 +1811,24 @@ class ChatStore extends ChangeNotifier {
 
   // ── Session ops ────────────────────────────────────────────────────
 
+  /// How many stored conversations to pull for the roster. The gateway cannot
+  /// filter its list by source (session.list takes only title, limit and
+  /// include_hidden), so a small page lets non-human sessions crowd human ones
+  /// out of the reply entirely. On a gateway in real use they outnumber human
+  /// conversations several times over, so this is deliberately generous.
+  static const int rosterFetchLimit = 600;
+
+  /// True when the last roster pull came back full, meaning older
+  /// conversations exist beyond what was fetched. The only signal available:
+  /// the reply carries no total.
+  bool _rosterTruncated = false;
+  bool get rosterTruncated => _rosterTruncated;
+
   Future<void> loadSessions() async {
     if (_client.state != GwConnectionState.open) return;
     try {
-      final res = await _client.request('session.list', {'limit': 200});
+      final res =
+          await _client.request('session.list', {'limit': rosterFetchLimit});
       final list = res['sessions'];
       final rows = (list is List ? list : const <Map<String, dynamic>>[])
           .whereType<Map<String, dynamic>>()
@@ -1771,6 +1839,7 @@ class ChatStore extends ChangeNotifier {
       // runs often. Re-assigning an identical roster on every pull notified
       // every store listener — including the transcript's rebuild. Skip when
       // nothing changed.
+      _rosterTruncated = rows.length >= rosterFetchLimit;
       if (_rosterEqual(_sessions, rows)) return;
       _sessions
         ..clear()

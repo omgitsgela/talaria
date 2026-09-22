@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../gateway/client.dart';
 import '../models/models.dart';
+import '../models/session_source.dart';
 import '../store/chat_store.dart';
 import '../app_scope.dart';
 import '../widgets/context_meter.dart';
@@ -2557,11 +2558,42 @@ class _SessionsSheetState extends State<SessionsSheet> {
     return '$_pinsPfx$host';
   }
 
+  /// Persisted "show non-human sessions" preference, scoped to the gateway
+  /// host like the pin set: a different gateway keeps its own answer.
+  static const _backgroundPfx = 'talaria.showBackground.';
+  String get _backgroundKey {
+    final host =
+        Uri.tryParse(store.config.baseUrl)?.host ?? store.config.baseUrl.trim();
+    return '$_backgroundPfx$host';
+  }
+
   @override
   void initState() {
     super.initState();
     _loadPins();
+    _loadBackgroundPref();
     _search.addListener(_onSearch);
+  }
+
+  /// Hydrate the automation-view preference. Best-effort, like the pins: a
+  /// missing pref simply leaves the default (hidden).
+  Future<void> _loadBackgroundPref() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      store.setShowBackgroundSessions(prefs.getBool(_backgroundKey) ?? false);
+    } catch (_) {
+      // Keep the default.
+    }
+  }
+
+  /// Persist the automation-view preference (fire-and-forget).
+  Future<void> _saveBackgroundPref() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool(_backgroundKey, store.showBackgroundSessions);
+    } catch (_) {
+      // The in-memory flag remains the source of truth for this session.
+    }
   }
 
   /// Roster filter. Matches the title AND the preview: the gateway's titles are
@@ -2578,11 +2610,19 @@ class _SessionsSheetState extends State<SessionsSheet> {
   List<SessionRow> _filtered(List<SessionRow> all) {
     final q = _query.toLowerCase();
     if (q.isEmpty) return all;
-    return all
-        .where((s) =>
-            s.title.toLowerCase().contains(q) ||
-            s.preview.toLowerCase().contains(q))
-        .toList(growable: false);
+    return all.where((s) {
+      if (s.title.toLowerCase().contains(q) ||
+          s.preview.toLowerCase().contains(q)) {
+        return true;
+      }
+      // Also match the source, so "telegram" or "api" finds those
+      // conversations even though the word appears in neither the title nor
+      // the preview.
+      final id = normalizeSessionSource(s.source);
+      if (id != null && id.contains(q)) return true;
+      final label = sessionSourceLabel(s.source);
+      return label != null && label.toLowerCase().contains(q);
+    }).toList(growable: false);
   }
 
   @override
@@ -2622,6 +2662,7 @@ class _SessionsSheetState extends State<SessionsSheet> {
       builder: (context, store) {
         final empty = store.sessions.isEmpty;
         final matches = _filtered(store.sessions);
+        final hiddenCount = store.hiddenBackgroundCount(matches);
         return Scaffold(
           backgroundColor: theme.scaffoldBackgroundColor,
           appBar: AppBar(
@@ -2673,6 +2714,43 @@ class _SessionsSheetState extends State<SessionsSheet> {
                         ),
                       ),
                     ),
+                    // Category filter. The gateway keeps ONE session list and
+                    // offers no way to ask for one source at a time, so on a
+                    // gateway in real use the cron jobs, subagent runs and
+                    // platform sessions outnumber the conversations a person
+                    // actually had and bury them. Those are held back by
+                    // default; this is the way to see them, labelled, when you
+                    // want them. The control is hidden entirely when there is
+                    // nothing to hold back, so a quiet gateway sees no change.
+                    if (hiddenCount > 0 || store.showBackgroundSessions)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                        child: Row(
+                          children: [
+                            FilterChip(
+                              key: const ValueKey('roster_categories_chip'),
+                              selected: store.showBackgroundSessions,
+                              onSelected: (value) {
+                                store.setShowBackgroundSessions(value);
+                                _saveBackgroundPref();
+                              },
+                              avatar: Icon(
+                                store.showBackgroundSessions
+                                    ? Icons.layers
+                                    : Icons.layers_outlined,
+                                size: 18,
+                              ),
+                              label: Text(
+                                store.showBackgroundSessions
+                                    ? 'Automation and API shown'
+                                    : 'Show automation and API ($hiddenCount)',
+                                style: theme.textTheme.bodySmall,
+                              ),
+                              visualDensity: VisualDensity.compact,
+                            ),
+                          ],
+                        ),
+                      ),
                     Expanded(
                       child: matches.isEmpty
                           ? _NoConversationMatches(
@@ -2696,6 +2774,19 @@ class _SessionsSheetState extends State<SessionsSheet> {
                                     for (final s in seg.rows)
                                       _buildTile(context, s),
                                   ],
+                                if (store.rosterTruncated)
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(
+                                        12, 14, 12, 4),
+                                    child: Text(
+                                      'Showing the most recent '
+                                      '${store.sessions.length} conversations.',
+                                      style: theme.textTheme.bodySmall
+                                          ?.copyWith(
+                                              color: theme.colorScheme
+                                                  .onSurfaceVariant),
+                                    ),
+                                  ),
                               ],
                             ),
                     ),
@@ -2715,6 +2806,12 @@ class _SessionsSheetState extends State<SessionsSheet> {
     // has no stored id and correctly matches no row.
     final active = s.id == store.activeStoredSessionId;
     final pinned = store.isPinned(s.id);
+    // Shown only for a source the roster holds back by default, so the badge
+    // appears exactly when it tells the reader something they need: which kind
+    // of non-human conversation this row is. An ordinary human row is unmarked.
+    final badge = isBackgroundSessionSource(s.source)
+        ? sessionSourceLabel(s.source)
+        : null;
     return ListTile(
       key: ValueKey('conv_${s.id}'),
       selected: active,
@@ -2749,6 +2846,7 @@ class _SessionsSheetState extends State<SessionsSheet> {
                 style: TextStyle(
                     fontWeight: active ? FontWeight.w600 : FontWeight.w400)),
           ),
+          if (badge != null) _SourceBadge(label: badge),
         ],
       ),
       subtitle: Text(
@@ -2960,6 +3058,34 @@ class _SessionsSheetState extends State<SessionsSheet> {
 /// Section header for the segmented conversations list. Pinned groups render
 /// in the accent (gold) color with a pin glyph; time groups render as
 /// high-contrast full-ink labels so they stand out against the list background.
+/// Small origin label for a conversation the roster holds back by default
+/// (Telegram, API, Cron jobs, Subagent runs, ...). Deliberately muted surface
+/// ink rather than the accent: it is information, not a highlight, and it must
+/// not compete with the pinned group's gold.
+class _SourceBadge extends StatelessWidget {
+  const _SourceBadge({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    return Container(
+      key: ValueKey('badge_$label'),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        label,
+        style: theme.textTheme.labelSmall?.copyWith(color: cs.onSurfaceVariant),
+      ),
+    );
+  }
+}
+
 class _SectionHeader extends StatelessWidget {
   const _SectionHeader({required this.label, this.pinned = false});
 
