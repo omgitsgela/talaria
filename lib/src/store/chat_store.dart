@@ -634,26 +634,35 @@ class ChatStore extends ChangeNotifier {
       }
       final category = sessionCategoryLabel(s.source);
       if (category != null) {
+        // With the human roster showing, these are held back entirely. With the
+        // automation view on they are the content.
         if (!_showBackgroundSessions) continue;
         byCategory.putIfAbsent(category, () => <SessionRow>[]).add(s);
         continue;
       }
+      // A human conversation, which the automation view does not show: the two
+      // are separate views rather than one appended list.
+      if (_showBackgroundSessions) continue;
       final bucket = _rosterTimeBucket(s.startedAt) ?? 'Older';
       byBucket[bucket]!.add(s);
     }
     final out = <RosterSegment>[];
+    // Pinned leads BOTH views: a pin is an explicit act and outranks the view.
     if (pinnedRows.isNotEmpty) out.add(RosterSegment('', pinnedRows));
-    for (final label in byBucket.keys) {
-      final rows = byBucket[label]!;
-      if (rows.isNotEmpty) out.add(RosterSegment(label, rows));
-    }
-    final labels = byCategory.keys.toList()
-      ..sort((a, b) {
-        final rank = sessionCategoryRank(a).compareTo(sessionCategoryRank(b));
-        return rank != 0 ? rank : a.compareTo(b);
-      });
-    for (final label in labels) {
-      out.add(RosterSegment(label, byCategory[label]!));
+    if (_showBackgroundSessions) {
+      final labels = byCategory.keys.toList()
+        ..sort((a, b) {
+          final rank = sessionCategoryRank(a).compareTo(sessionCategoryRank(b));
+          return rank != 0 ? rank : a.compareTo(b);
+        });
+      for (final label in labels) {
+        out.add(RosterSegment(label, byCategory[label]!));
+      }
+    } else {
+      for (final label in byBucket.keys) {
+        final rows = byBucket[label]!;
+        if (rows.isNotEmpty) out.add(RosterSegment(label, rows));
+      }
     }
     return out;
   }

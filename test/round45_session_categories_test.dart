@@ -155,7 +155,7 @@ void main() {
     expect(store.hiddenBackgroundCount(store.sessions), 2);
   });
 
-  test('showing automation groups it by source, scheduled work first', () {
+  test('showing automation switches to a view of it, not an appended list', () {
     final store = fresh();
     addTearDown(store.dispose);
     _seedSessions(store, [
@@ -178,16 +178,50 @@ void main() {
 
     final segs = store.segmentedSessions(store.sessions);
     final labels = segs.map((s) => s.label).toList();
-    // Human traffic keeps its time bucket, and it comes first.
-    expect(labels.first, 'Today');
+    // The automation rows ARE the content of this view.
     expect(labels, containsAll(<String>['Cron jobs', 'Telegram', 'API']));
+    // And the human roster is NOT in it. Appending the categories after the
+    // human rows made the toggle look inert on a real gateway: the human rows
+    // come first, so the revealed groups began around row 176 (measured: 175
+    // direct rows inside a 600-row fetch window) and were never on screen.
+    expect(labels, isNot(contains('Today')));
+    final ids = segs.expand((s) => s.rows).map((r) => r.id).toList();
+    expect(ids, containsAll(<String>['tg', 'api', 'cron']));
+    expect(ids, isNot(contains('human')));
     // Cron leads the category groups, then platforms alphabetically.
     expect(labels.indexOf('Cron jobs'), lessThan(labels.indexOf('API')));
     expect(labels.indexOf('API'), lessThan(labels.indexOf('Telegram')));
-    final ids = segs.expand((s) => s.rows).map((r) => r.id).toList();
-    expect(ids, containsAll(<String>['human', 'tg', 'api', 'cron']));
     // Nothing is held back once they are shown, so the count is zero.
     expect(store.hiddenBackgroundCount(store.sessions), 0);
+  });
+
+  test('a pinned conversation leads both views', () {
+    final store = fresh();
+    addTearDown(store.dispose);
+    _seedSessions(store, [
+      SessionRow(
+          id: 'human',
+          title: 'Real conversation',
+          startedAt: _daysAgoAt(0, 9),
+          source: 'desktop'),
+      SessionRow(
+          id: 'tg', title: 'Telegram chatter', startedAt: _daysAgoAt(0, 9),
+          source: 'telegram'),
+    ]);
+    store.togglePin('human');
+
+    // Direct view: the pin leads, the Telegram row is held back.
+    var segs = store.segmentedSessions(store.sessions);
+    expect(segs.first.label, isEmpty);
+    expect(segs.first.rows.map((r) => r.id), contains('human'));
+
+    // Automation view: the pin STILL leads, because a pin is an explicit act
+    // and outranks whichever view is on.
+    store.setShowBackgroundSessions(true);
+    segs = store.segmentedSessions(store.sessions);
+    expect(segs.first.label, isEmpty);
+    expect(segs.first.rows.map((r) => r.id), contains('human'));
+    expect(segs.map((s) => s.label), contains('Telegram'));
   });
 
   test('a pinned non-human conversation is never held back', () {
@@ -231,7 +265,7 @@ void main() {
 
   /// A bare pumpWidget gives an 800x600 surface, which is wider than any phone
   /// Talaria runs on. Pump at a realistic phone size instead.
-  void _phoneSurface(WidgetTester tester) {
+  void phoneSurface(WidgetTester tester) {
     addTearDown(() {
       tester.view.resetPhysicalSize();
       tester.view.resetDevicePixelRatio();
@@ -240,9 +274,9 @@ void main() {
     tester.view.devicePixelRatio = 3.0;
   }
 
-  Future<ChatStore> _pumpSheet(WidgetTester tester) async {
+  Future<ChatStore> pumpSheet(WidgetTester tester) async {
     SharedPreferences.setMockInitialValues({});
-    _phoneSurface(tester);
+    phoneSurface(tester);
     final store = ChatStore(config: _cfg, client: CategoryGateway());
     addTearDown(store.dispose);
     _seedSessions(store, [
@@ -266,7 +300,7 @@ void main() {
 
   testWidgets('the sheet offers the filter and counts what it hides',
       (tester) async {
-    await _pumpSheet(tester);
+    await pumpSheet(tester);
 
     // The human conversation is there; the others are not, and are counted.
     expect(find.text('Real conversation'), findsOneWidget);
@@ -277,7 +311,7 @@ void main() {
 
   testWidgets('tapping the filter reveals the sessions, labelled',
       (tester) async {
-    final store = await _pumpSheet(tester);
+    final store = await pumpSheet(tester);
 
     await tester.tap(find.byKey(const ValueKey('roster_categories_chip')));
     await tester.pumpAndSettle();
@@ -295,9 +329,58 @@ void main() {
     expect(find.byKey(const ValueKey('badge_Desktop')), findsNothing);
   });
 
+  testWidgets('the revealed sessions are ON SCREEN, not far below it',
+      (tester) async {
+    // The original defect: the categories were appended AFTER the human rows,
+    // so on a real gateway (175 human rows inside a 600-row fetch window) the
+    // revealed groups started around row 176 and the toggle looked like it did
+    // nothing. A find.text assertion cannot catch that, because a ListView
+    // builds children whether or not they are visible. This asserts POSITION.
+    SharedPreferences.setMockInitialValues({});
+    phoneSurface(tester);
+    final store = ChatStore(config: _cfg, client: CategoryGateway());
+    addTearDown(store.dispose);
+    _seedSessions(store, [
+      for (var i = 0; i < 30; i++)
+        SessionRow(
+            id: 'human\$i',
+            title: 'Real conversation \$i',
+            startedAt: _daysAgoAt(0, 9),
+            source: 'desktop'),
+      for (var i = 0; i < 20; i++)
+        SessionRow(
+            id: 'tg\$i',
+            title: 'Telegram chatter \$i',
+            startedAt: _daysAgoAt(0, 9),
+            source: 'telegram'),
+    ]);
+
+    await tester.pumpWidget(
+        MaterialApp(home: Scaffold(body: SessionsSheet(store: store))));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('roster_categories_chip')));
+    await tester.pumpAndSettle();
+
+    // The first automation group must be within the first screenful, not
+    // hundreds of rows down.
+    final header = find.text('Telegram').first;
+    expect(header, findsOneWidget);
+    expect(tester.getTopLeft(header).dy, lessThan(300),
+        reason: 'the revealed group must start near the top, not below the '
+            'human roster');
+    // And the human rows are not in this view at all.
+    expect(find.textContaining('Real conversation'), findsNothing);
+    // Which of the seeded rows lands first is not guaranteed (they share one
+    // timestamp), so assert that a row of the group is on screen, not a
+    // particular one.
+    expect(find.textContaining('Telegram chatter'), findsWidgets);
+    // The control offers the way back.
+    expect(find.text('Back to your conversations'), findsOneWidget);
+  });
+
   testWidgets('searching a platform name finds its conversations',
       (tester) async {
-    final store = await _pumpSheet(tester);
+    final store = await pumpSheet(tester);
     store.setShowBackgroundSessions(true);
     await tester.pumpAndSettle();
 

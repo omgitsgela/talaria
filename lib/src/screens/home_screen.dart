@@ -161,7 +161,8 @@ class _HomeScreenState extends State<HomeScreen> {
       _noticeSub = null;
       _trackedStore = s;
       if (s != null) {
-        _lastSessionId = null; // first bind: treat as a switch → jump to bottom.
+        _lastSessionId =
+            null; // first bind: treat as a switch → jump to bottom.
         _seenTranscriptEpoch = s.transcriptEpoch;
         s.addListener(_onStoreChanged);
         _noticeSub = s.notices.listen((text) {
@@ -543,8 +544,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// Calendar-day key (local timezone) used to detect a day boundary.
-  static String _dayBucket(DateTime t) =>
-      '${t.year}-${t.month}-${t.day}';
+  static String _dayBucket(DateTime t) => '${t.year}-${t.month}-${t.day}';
 
   /// Human label for a time bucket: "Today", "Yesterday", or a localized
   /// date (e.g. "Sep 8" / "Aug 14, 2025"). Localized via `intl`'s date
@@ -560,8 +560,18 @@ class _HomeScreenState extends State<HomeScreen> {
       return _fmtDay(t);
     } catch (_) {
       final months = const [
-        'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-        'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+        'Jan',
+        'Feb',
+        'Mar',
+        'Apr',
+        'May',
+        'Jun',
+        'Jul',
+        'Aug',
+        'Sep',
+        'Oct',
+        'Nov',
+        'Dec'
       ];
       final sameYear = t.year == now.year;
       return sameYear
@@ -698,8 +708,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 }
                                 return false;
                               },
-                              child:
-                              ListView.builder(
+                              child: ListView.builder(
                                 controller: _scroll,
                                 // NO automatic keep-alives. Each transcript row
                                 // can hold a `SelectableText`, whose inner
@@ -902,7 +911,8 @@ class _ReadDivider extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: Container(height: 1, color: cs.primary.withValues(alpha: 0.55)),
+            child:
+                Container(height: 1, color: cs.primary.withValues(alpha: 0.55)),
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -915,7 +925,8 @@ class _ReadDivider extends StatelessWidget {
             ),
           ),
           Expanded(
-            child: Container(height: 1, color: cs.primary.withValues(alpha: 0.55)),
+            child:
+                Container(height: 1, color: cs.primary.withValues(alpha: 0.55)),
           ),
         ],
       ),
@@ -998,8 +1009,7 @@ class _ModelQuickConfigSheet extends StatefulWidget {
   final ChatStore store;
 
   @override
-  State<_ModelQuickConfigSheet> createState() =>
-      _ModelQuickConfigSheetState();
+  State<_ModelQuickConfigSheet> createState() => _ModelQuickConfigSheetState();
 }
 
 class _ModelQuickConfigSheetState extends State<_ModelQuickConfigSheet> {
@@ -1063,7 +1073,8 @@ class _ModelQuickConfigSheetState extends State<_ModelQuickConfigSheet> {
     final r = await store.setFast(on);
     if (!mounted) return;
     _busy = false;
-    _showFlash(r == (on ? 'fast' : 'normal') ? (on ? 'Fast on' : 'Fast off') : r);
+    _showFlash(
+        r == (on ? 'fast' : 'normal') ? (on ? 'Fast on' : 'Fast off') : r);
   }
 
   Future<void> _toggleShowTraces(bool on) async {
@@ -1082,8 +1093,7 @@ class _ModelQuickConfigSheetState extends State<_ModelQuickConfigSheet> {
     final cs = theme.colorScheme;
     final thinking = store.thinkingEnabled;
     final level = store.reasoningEffort;
-    final levelActive =
-        thinking && ChatStore.reasoningLevels.contains(level);
+    final levelActive = thinking && ChatStore.reasoningLevels.contains(level);
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -1162,9 +1172,8 @@ class _ModelQuickConfigSheetState extends State<_ModelQuickConfigSheet> {
                           ChoiceChip(
                             label: Text(l),
                             selected: levelActive && level == l,
-                            onSelected: thinking && !_busy
-                                ? (_) => _setLevel(l)
-                                : null,
+                            onSelected:
+                                thinking && !_busy ? (_) => _setLevel(l) : null,
                           ),
                       ],
                     ),
@@ -1212,8 +1221,7 @@ class _ModelQuickConfigSheetState extends State<_ModelQuickConfigSheet> {
                 padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
                 child: Text(
                   _flashMsg!,
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: cs.primary),
+                  style: theme.textTheme.bodySmall?.copyWith(color: cs.primary),
                 ),
               ),
           ],
@@ -1270,7 +1278,8 @@ class _ChatAppbar extends StatelessWidget {
               onPressed: () {
                 Navigator.of(context).push(
                   MaterialPageRoute(
-                    builder: (_) => SettingsScreen(store: store, configTransport: store.client.request),
+                    builder: (_) => SettingsScreen(
+                        store: store, configTransport: store.client.request),
                   ),
                 );
               },
@@ -1347,9 +1356,8 @@ class _ChatAppbar extends StatelessWidget {
                           const SizedBox(width: 2),
                           Icon(Icons.tune,
                               size: 13,
-                              color:
-                                  theme.colorScheme.onSurfaceVariant.withValues(
-                                      alpha: 0.8)),
+                              color: theme.colorScheme.onSurfaceVariant
+                                  .withValues(alpha: 0.8)),
                         ],
                       ),
                     ),
@@ -1468,8 +1476,7 @@ class _ChatAppbar extends StatelessWidget {
   }
 
   void _snack(BuildContext context, String text) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(text)));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
   void _showSessions(BuildContext context, ChatStore store) {
@@ -1558,7 +1565,9 @@ class _ChatAppbar extends StatelessWidget {
                       Navigator.of(sheetContext).pop();
                       Navigator.of(context).push(
                         MaterialPageRoute(
-                          builder: (_) => SettingsScreen(store: store, configTransport: store.client.request),
+                          builder: (_) => SettingsScreen(
+                              store: store,
+                              configTransport: store.client.request),
                         ),
                       );
                     },
@@ -1695,7 +1704,8 @@ class _NoConversationMatches extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.search_off, size: 32, color: muted.withValues(alpha: 0.7)),
+            Icon(Icons.search_off,
+                size: 32, color: muted.withValues(alpha: 0.7)),
             const SizedBox(height: 10),
             Text('No conversations match “$query”.',
                 textAlign: TextAlign.center,
@@ -1742,12 +1752,18 @@ class _GoalBar extends StatelessWidget {
     final (IconData icon, Color accent, String label) = switch (goal.status) {
       'active' => (Icons.flag_rounded, cs.primary, 'Goal'),
       'waiting' => (Icons.hourglass_top_rounded, cs.tertiary, 'Goal — waiting'),
-      'paused' => (Icons.pause_circle_outline_rounded, cs.onSurfaceVariant, 'Goal — paused'),
-      'done' => (Icons.check_circle_rounded,
+      'paused' => (
+          Icons.pause_circle_outline_rounded,
+          cs.onSurfaceVariant,
+          'Goal — paused'
+        ),
+      'done' => (
+          Icons.check_circle_rounded,
           cs.brightness == Brightness.dark
               ? const Color(0xFF4ADE80)
               : const Color(0xFF16A34A),
-          'Goal — done'),
+          'Goal — done'
+        ),
       _ => (Icons.flag_rounded, cs.primary, 'Goal'),
     };
 
@@ -1773,8 +1789,8 @@ class _GoalBar extends StatelessWidget {
                   children: [
                     Text(
                       label,
-                      style: theme.textTheme.labelSmall
-                          ?.copyWith(color: accent, fontWeight: FontWeight.w700),
+                      style: theme.textTheme.labelSmall?.copyWith(
+                          color: accent, fontWeight: FontWeight.w700),
                     ),
                     if (goal.detail != null && goal.detail!.isNotEmpty) ...[
                       const SizedBox(width: 8),
@@ -1795,8 +1811,8 @@ class _GoalBar extends StatelessWidget {
                   goal.title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                      color: cs.onSurface, height: 1.3),
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: cs.onSurface, height: 1.3),
                 ),
               ],
             ),
@@ -1945,8 +1961,8 @@ class _RequestCardState extends State<_RequestCard> {
                     ? (_approvalLabels[c.toString()] ?? c.toString())
                     : c.toString()),
                 selected: false,
-                onSelected: (_) => unawaited(
-                    store.respondApproval(approved: true, choice: c.toString())),
+                onSelected: (_) => unawaited(store.respondApproval(
+                    approved: true, choice: c.toString())),
               ),
           ],
         ),
@@ -2172,12 +2188,16 @@ class _ComposerState extends State<_Composer> {
         throw GatewayError('Image is too large. The gateway limit is 25 MiB.');
       }
       final bytes = await file.readAsBytes();
-      if (!mounted || target != store || session != target.activeSessionId) return;
-      target.queueImage(bytes, filename: file.name.isEmpty ? 'image.png' : file.name);
+      if (!mounted || target != store || session != target.activeSessionId) {
+        return;
+      }
+      target.queueImage(bytes,
+          filename: file.name.isEmpty ? 'image.png' : file.name);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(e is GatewayError ? e.message : 'Could not pick photo: $e'),
+          content:
+              Text(e is GatewayError ? e.message : 'Could not pick photo: $e'),
         ));
       }
     } finally {
@@ -2263,13 +2283,15 @@ class _ComposerState extends State<_Composer> {
                           tooltip: 'Attach image',
                           icon: const Icon(Icons.image_outlined),
                           onPressed: _pickingImage || store.sendingAttachments
-                              ? null : () => _attachImage(ImageSource.gallery),
+                              ? null
+                              : () => _attachImage(ImageSource.gallery),
                         ),
                         IconButton(
                           tooltip: 'Take photo',
                           icon: const Icon(Icons.camera_alt_outlined),
                           onPressed: _pickingImage || store.sendingAttachments
-                              ? null : () => _attachImage(ImageSource.camera),
+                              ? null
+                              : () => _attachImage(ImageSource.camera),
                         ),
                       ],
                     ),
@@ -2473,8 +2495,9 @@ class _MarqueeTextState extends State<MarqueeText>
     if (MediaQuery.maybeOf(context)?.disableAnimations == true) {
       return Text(widget.text, overflow: TextOverflow.ellipsis);
     }
-    if (widget.text.length <= 60)
+    if (widget.text.length <= 60) {
       return Text(widget.text, overflow: TextOverflow.ellipsis);
+    }
     return AnimatedBuilder(
       animation: _c,
       builder: (context, _) {
@@ -2663,6 +2686,8 @@ class _SessionsSheetState extends State<SessionsSheet> {
         final empty = store.sessions.isEmpty;
         final matches = _filtered(store.sessions);
         final hiddenCount = store.hiddenBackgroundCount(matches);
+        // The roster is one of two views, not one list with an appendix.
+        final segs = store.segmentedSessions(matches);
         return Scaffold(
           backgroundColor: theme.scaffoldBackgroundColor,
           appBar: AppBar(
@@ -2727,68 +2752,89 @@ class _SessionsSheetState extends State<SessionsSheet> {
                         padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
                         child: Row(
                           children: [
-                            FilterChip(
-                              key: const ValueKey('roster_categories_chip'),
-                              selected: store.showBackgroundSessions,
-                              onSelected: (value) {
-                                store.setShowBackgroundSessions(value);
-                                _saveBackgroundPref();
-                              },
-                              avatar: Icon(
-                                store.showBackgroundSessions
-                                    ? Icons.layers
-                                    : Icons.layers_outlined,
-                                size: 18,
+                            // Flexible + an ellipsizing label: the chip's text is
+                            // long enough to overflow a 420px phone surface by a
+                            // pixel or so, and a Row child that cannot shrink
+                            // throws a RenderFlex overflow instead.
+                            Flexible(
+                              child: FilterChip(
+                                key: const ValueKey('roster_categories_chip'),
+                                selected: store.showBackgroundSessions,
+                                onSelected: (value) {
+                                  store.setShowBackgroundSessions(value);
+                                  _saveBackgroundPref();
+                                },
+                                avatar: Icon(
+                                  store.showBackgroundSessions
+                                      ? Icons.layers
+                                      : Icons.layers_outlined,
+                                  size: 18,
+                                ),
+                                label: Text(
+                                  store.showBackgroundSessions
+                                      ? 'Back to your conversations'
+                                      : 'Show automation and API ($hiddenCount)',
+                                  style: theme.textTheme.bodySmall,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                visualDensity: VisualDensity.compact,
                               ),
-                              label: Text(
-                                store.showBackgroundSessions
-                                    ? 'Automation and API shown'
-                                    : 'Show automation and API ($hiddenCount)',
-                                style: theme.textTheme.bodySmall,
-                              ),
-                              visualDensity: VisualDensity.compact,
                             ),
                           ],
                         ),
                       ),
                     Expanded(
-                      child: matches.isEmpty
-                          ? _NoConversationMatches(
-                              query: _query, onClear: _search.clear)
-                          : ListView(
-                              padding: const EdgeInsets.fromLTRB(8, 4, 8, 12),
-                              children: [
-                                for (final seg
-                                    in store.segmentedSessions(matches))
-                                  ...[
-                                    // Section header. The pinned group gets a
-                                    // distinct "Pinned" header with a pin
-                                    // glyph; time groups get their bucket label
-                                    // (Today / Yesterday / …).
-                                    _SectionHeader(
-                                      label: seg.label.isEmpty
-                                          ? 'Pinned'
-                                          : seg.label,
-                                      pinned: seg.label.isEmpty,
-                                    ),
-                                    for (final s in seg.rows)
-                                      _buildTile(context, s),
+                      child: segs.isEmpty &&
+                              _query.isEmpty &&
+                              store.showBackgroundSessions
+                          ? Center(
+                              child: Padding(
+                                padding: const EdgeInsets.all(24),
+                                child: Text(
+                                  'No automation sessions on this gateway.',
+                                  textAlign: TextAlign.center,
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                      color:
+                                          theme.colorScheme.onSurfaceVariant),
+                                ),
+                              ),
+                            )
+                          : matches.isEmpty
+                              ? _NoConversationMatches(
+                                  query: _query, onClear: _search.clear)
+                              : ListView(
+                                  padding:
+                                      const EdgeInsets.fromLTRB(8, 4, 8, 12),
+                                  children: [
+                                    for (final seg in segs) ...[
+                                      // Section header. The pinned group gets a
+                                      // distinct "Pinned" header with a pin
+                                      // glyph; time groups get their bucket label
+                                      // (Today / Yesterday / …).
+                                      _SectionHeader(
+                                        label: seg.label.isEmpty
+                                            ? 'Pinned'
+                                            : seg.label,
+                                        pinned: seg.label.isEmpty,
+                                      ),
+                                      for (final s in seg.rows)
+                                        _buildTile(context, s),
+                                    ],
+                                    if (store.rosterTruncated)
+                                      Padding(
+                                        padding: const EdgeInsets.fromLTRB(
+                                            12, 14, 12, 4),
+                                        child: Text(
+                                          'Showing the most recent '
+                                          '${store.sessions.length} conversations.',
+                                          style: theme.textTheme.bodySmall
+                                              ?.copyWith(
+                                                  color: theme.colorScheme
+                                                      .onSurfaceVariant),
+                                        ),
+                                      ),
                                   ],
-                                if (store.rosterTruncated)
-                                  Padding(
-                                    padding: const EdgeInsets.fromLTRB(
-                                        12, 14, 12, 4),
-                                    child: Text(
-                                      'Showing the most recent '
-                                      '${store.sessions.length} conversations.',
-                                      style: theme.textTheme.bodySmall
-                                          ?.copyWith(
-                                              color: theme.colorScheme
-                                                  .onSurfaceVariant),
-                                    ),
-                                  ),
-                              ],
-                            ),
+                                ),
                     ),
                   ],
                 ),
@@ -2819,13 +2865,11 @@ class _SessionsSheetState extends State<SessionsSheet> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       leading: pinned
-          ? Icon(Icons.push_pin,
-              size: 20, color: cs.primary)
+          ? Icon(Icons.push_pin, size: 20, color: cs.primary)
           : Icon(
               active ? Icons.chat_bubble : Icons.chat_bubble_outline,
               size: 20,
-              color:
-                  active ? cs.primary : cs.onSurfaceVariant,
+              color: active ? cs.primary : cs.onSurfaceVariant,
             ),
       title: Row(
         children: [
@@ -2834,14 +2878,12 @@ class _SessionsSheetState extends State<SessionsSheet> {
           // state), a faint dot when idle. The ACTIVE row uses the store's
           // live state; other rows use the last gateway-reported status.
           _SessionDot(
-            state: active
-                ? store.activeSessionState
-                : store.sessionDotState(s.id),
+            state:
+                active ? store.activeSessionState : store.sessionDotState(s.id),
           ),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-                s.title.isEmpty ? 'Untitled' : s.title,
+            child: Text(s.title.isEmpty ? 'Untitled' : s.title,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                     fontWeight: active ? FontWeight.w600 : FontWeight.w400)),
@@ -2849,10 +2891,8 @@ class _SessionsSheetState extends State<SessionsSheet> {
           if (badge != null) _SourceBadge(label: badge),
         ],
       ),
-      subtitle: Text(
-          s.preview.isEmpty ? _ts(s.startedAt) : s.preview,
-          overflow: TextOverflow.ellipsis,
-          style: theme.textTheme.bodySmall),
+      subtitle: Text(s.preview.isEmpty ? _ts(s.startedAt) : s.preview,
+          overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall),
       trailing: PopupMenuButton<String>(
         itemBuilder: (context) => [
           PopupMenuItem(
@@ -2874,11 +2914,9 @@ class _SessionsSheetState extends State<SessionsSheet> {
           PopupMenuItem(
             value: 'hide',
             child: Row(children: [
-              Icon(Icons.visibility_off_outlined,
-                  size: 20, color: cs.error),
+              Icon(Icons.visibility_off_outlined, size: 20, color: cs.error),
               const SizedBox(width: 12),
-              Text('Hide from list',
-                  style: TextStyle(color: cs.error)),
+              Text('Hide from list', style: TextStyle(color: cs.error)),
             ]),
           ),
           const PopupMenuItem(
@@ -2900,8 +2938,7 @@ class _SessionsSheetState extends State<SessionsSheet> {
           PopupMenuItem(
             value: 'delete',
             child: Row(children: [
-              Icon(Icons.delete_outline,
-                  size: 20, color: cs.error),
+              Icon(Icons.delete_outline, size: 20, color: cs.error),
               const SizedBox(width: 12),
               Text('Delete', style: TextStyle(color: cs.error)),
             ]),
@@ -2914,9 +2951,7 @@ class _SessionsSheetState extends State<SessionsSheet> {
               await _savePins();
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(nowPinned
-                        ? 'Pinned to top'
-                        : 'Unpinned')));
+                    content: Text(nowPinned ? 'Pinned to top' : 'Unpinned')));
               }
             case 'rename':
               final title = await _promptTitle(context, s.title);
@@ -2953,8 +2988,8 @@ class _SessionsSheetState extends State<SessionsSheet> {
               // A delete that silently does nothing is the old bug — always
               // tell the user what happened.
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(ok
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    content: Text(ok
                         ? 'Conversation deleted'
                         : (store.statusLine.isEmpty
                             ? 'Could not delete conversation'
@@ -2983,10 +3018,9 @@ class _SessionsSheetState extends State<SessionsSheet> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete conversation?'),
-        content: Text(
-            title.trim().isEmpty
-                ? 'This conversation and its transcript will be deleted. This cannot be undone.'
-                : '"$title" and its transcript will be deleted. This cannot be undone.'),
+        content: Text(title.trim().isEmpty
+            ? 'This conversation and its transcript will be deleted. This cannot be undone.'
+            : '"$title" and its transcript will be deleted. This cannot be undone.'),
         actions: [
           TextButton(
               onPressed: () => Navigator.of(context).pop(),

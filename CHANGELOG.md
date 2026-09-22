@@ -3,6 +3,19 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.3.4
+
+### build 43
+- **The automation filter actually changes what you see now.** Turning it on did switch the list, but the
+  sessions it revealed were appended AFTER your own conversations. Measured on a real gateway, a
+  conversation-with-a-person fills the first 175 rows of the 600-row roster window, so the revealed
+  groups began around row 176, roughly 170 conversations below the fold, and the tap looked like it did
+  nothing. It is now a view switch: the button shows the machine-driven sessions in place of your own,
+  grouped by source and badged per row, and reads "Back to your conversations" while it is on. Pinned
+  conversations lead both views, because a pin is an explicit act. (#20)
+- Fixes a one-pixel overflow on the filter chip itself at phone width, and takes the analyzer from its
+  24-issue baseline to 23.
+
 ## 1.3.3
 
 ### build 42
