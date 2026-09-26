@@ -1228,10 +1228,151 @@ class ChatStore extends ChangeNotifier {
     }
   }
 
+  /// Run a session-scoped request, recovering ONCE from a stale runtime id.
+  ///
+  /// The gateway answers 4001 ("session not found") when the runtime id in hand
+  /// no longer resolves: the gateway restarted, or the session ended under us.
+  /// Every transcript RPC already recovered from that, but the attach RPCs did
+  /// not, so attaching a file failed with a bare session-not-found, and the
+  /// SEND that followed then looked like the broken step.
+  Future<Map<String, dynamic>> _sessionRequest(
+      String method, Map<String, dynamic> Function(String sid) build,
+      {int timeoutMs = 120000, void Function()? onRecover}) async {
+    final sid = await _ensureSession();
+    if (sid == null || sid.isEmpty) {
+      throw GatewayError('no live session to target');
+    }
+    try {
+      return await _client.request(method, build(sid), timeoutMs);
+    } on GatewayError catch (e) {
+      if (e.code != 4001) rethrow;
+      final stored = _activeStoredSessionId;
+      if (stored == null || stored.isEmpty) rethrow;
+      if (!await _recoverStaleActiveSession(stored)) rethrow;
+      final fresh = _activeSessionId;
+      if (fresh == null || fresh.isEmpty) rethrow;
+      // A re-resume bumps the caller's generation counters. Tell the caller to
+      // re-baseline, otherwise a caller guarding on "did the lifecycle change
+      // under me" discards a request that actually succeeded, which is the same
+      // silent-failure shape this recovery exists to remove.
+      onRecover?.call();
+      return await _client.request(method, build(fresh), timeoutMs);
+    }
+  }
+
+  // ── Attachment limits ──────────────────────────────────────────────
+  // The gateway raises its websocket frame limit for attachments to 384 MiB
+  // (`hermes_cli/web_server.py::_DESKTOP_ATTACHMENT_WS_MAX_BYTES`). A data URL
+  // inflates the bytes by 4/3, so cap the FILE below that with room for the
+  // JSON envelope: above it the frame is rejected and the socket closes, which
+  // reads as "nothing happened".
+  static const int maxAttachBytes = 256 * 1024 * 1024;
+
+  /// Why the last attach failed, for the UI to show and then clear. Null when
+  /// the last attach succeeded.
+  String? _attachError;
+  String? get attachError => _attachError;
+  void clearAttachError() {
+    if (_attachError == null) return;
+    _attachError = null;
+    _notify();
+  }
+
+  static String humanSize(int bytes) {
+    if (bytes >= 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+    }
+    if (bytes >= 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    if (bytes >= 1024) return '${(bytes / 1024).toStringAsFixed(0)} KB';
+    return '$bytes bytes';
+  }
+
   // ── Event wiring ───────────────────────────────────────────────────
 
   void _wireEvents() {
     _eventSub = _client.events.listen(_onEvent);
+    _requestSub = _client.serverRequests.listen(_onServerRequest);
+  }
+
+  // ── Requests the gateway needs ANSWERED ────────────────────────────
+  // Approvals, the sudo password and secret prompts arrive as server→client
+  // request frames, not events, and the gateway blocks the agent until each is
+  // answered. The app had no channel for them at all, so no approval dialog or
+  // sudo prompt could ever appear and the turn sat until the gateway's own
+  // timeout.
+  ServerRequest? _pendingValueRequest;
+  StreamSubscription<ServerRequest>? _requestSub;
+
+  /// The sudo/secret prompt waiting on the user, if any.
+  ServerRequest? get pendingValueRequest => _pendingValueRequest;
+
+  /// The session's EFFECTIVE approval bypass, straight from the gateway.
+  ///
+  /// The gateway ORs three sources for this (the per-session flag that /yolo
+  /// sets, the process-wide --yolo, and `approvals.mode: off`), so the session
+  /// flag alone can read "off" while the gateway is auto-approving everything.
+  /// Taken from session.info rather than tracked locally, because a guess here
+  /// is worse than nothing: the whole point is knowing whether approvals are
+  /// really being skipped.
+  bool _yoloActive = false;
+  bool get yoloActive => _yoloActive;
+
+  void _onServerRequest(ServerRequest req) {
+    switch (req.method) {
+      case 'approval':
+        // Feed the EXISTING pending-request card rather than a second one: the
+        // app already renders approvals and clarifies from `_pendingRequest`,
+        // and answers them through the clarify/approval RPCs with a mandatory
+        // request_id. The card was never the missing piece; the channel was.
+        _pendingRequest = GatewayEvent(
+          type: 'approval.request',
+          sessionId: req.sessionId,
+          payload: req.params,
+        );
+        _statusLine = 'Waiting for your input…';
+        _notify();
+        return;
+      case 'sudo':
+      case 'secret':
+      case 'vault.unlock_prompt':
+      case 'vault.save_login':
+      case 'vault.code':
+        _pendingValueRequest = req;
+        _notify();
+        return;
+      case 'clarify':
+        // The clarify UI already exists and answers through the
+        // `clarify.respond` RPC, which resolves the same queue entry; that
+        // resolution withdraws this request. Re-shape it into the event the
+        // existing UI consumes so a live clarify now shows up too.
+        if (req.sessionId == null || req.sessionId == _activeSessionId) {
+          _onEvent(GatewayEvent(
+            type: 'clarify.request',
+            sessionId: req.sessionId,
+            payload: req.params,
+          ));
+        }
+        return;
+      default:
+        // A prompt this client cannot serve (GUI reads, previews, tours).
+        // Answer immediately so the agent is not parked until the timeout:
+        // an empty value is the gateway's own "renderer skipped" answer.
+        _client.respondToServerRequest(
+            req.id, req.wantsValue ? {'value': ''} : {'answer': ''});
+        return;
+    }
+  }
+
+  /// Answer a sudo or secret prompt. The value goes straight back to the
+  /// gateway's waiting callback and is never stored or shown again.
+  void respondValue(String value) {
+    final req = _pendingValueRequest;
+    if (req == null) return;
+    _pendingValueRequest = null;
+    _client.respondToServerRequest(req.id, {'value': value});
+    _notify();
   }
 
   void _onEvent(GatewayEvent ev) {
@@ -1472,6 +1613,14 @@ class ChatStore extends ChangeNotifier {
               _reasoningEffort = effort;
               _notify();
             }
+          }
+          // Whether approvals are actually being skipped for this session. The
+          // gateway computes it from all three sources, so /yolo typing success
+          // is not the same question as /yolo being in effect.
+          final yolo = ev.payload['yolo'];
+          if (yolo is bool && yolo != _yoloActive) {
+            _yoloActive = yolo;
+            _notify();
           }
         }
         break;
@@ -3130,37 +3279,80 @@ class ChatStore extends ChangeNotifier {
   /// Stores the gateway's `ref_text` (`@file:...`) so [send] can prepend it.
   Future<String> attachFileBytes(List<int> bytes,
       {String name = 'file'}) async {
-    final attachGen = _attachGen;
+    var attachGen = _attachGen;
+    _attachError = null;
+    if (bytes.isEmpty) {
+      _attachError = 'That file is empty, so there was nothing to attach.';
+      _notify();
+      return '';
+    }
+    if (bytes.length > maxAttachBytes) {
+      _attachError = 'That file is ${humanSize(bytes.length)}. The gateway takes '
+          'attachments up to ${humanSize(maxAttachBytes)} in one frame; a larger '
+          'one is rejected and the connection drops.';
+      _notify();
+      return '';
+    }
     try {
-      final sid = await _ensureSession();
-      if (sid == null || sid.isEmpty) {
-        // A stale session.create (user switched while it was in flight)
-        // returned no usable session — discard the in-flight attach.
-        return '';
-      }
-      final res = await _client.request('file.attach', {
-        'session_id': sid,
-        'data_url': 'data:;base64,${base64Encode(bytes)}',
-        'name': name,
-      });
-      // Guard: generation check catches sid reuse after a detach+re-resume
-      // of the same stored session; sid-only misses that case.
-      if (attachGen != _attachGen || sid != _activeSessionId) return '';
+      final res = await _sessionRequest(
+        'file.attach',
+        (sid) => {
+          'session_id': sid,
+          'data_url': 'data:;base64,${base64Encode(bytes)}',
+          'name': name,
+        },
+        // Sending is proportional to size, so a fixed ceiling timed out on a
+        // large file and then reported nothing useful about why.
+        timeoutMs: _attachTimeoutMs(bytes.length),
+        onRecover: () => attachGen = _attachGen,
+      );
+      // Guard: generation check catches sid reuse after a detach+re-resume of
+      // the same stored session. The sid itself may legitimately have changed
+      // here, because recovery from a 4001 re-resumes the session.
+      if (attachGen != _attachGen) return '';
       // Prefer ref_text (@file:...) for prompt insertion; fall back to path.
       final ref =
           (res['ref_text'] ?? res['ref'] ?? res['path'] ?? res['name'] ?? '')
               .toString();
-      if (ref.isNotEmpty) {
-        _pendingAttachments.add(ref);
-        _attachmentDetails[ref] = PendingAttachment(ref: ref, filename: name,
-            sizeBytes: bytes.length);
+      if (ref.isEmpty) {
+        _attachError =
+            'The gateway accepted $name but returned no reference to attach.';
+        _notify();
+        return '';
       }
+      if (!_pendingAttachments.contains(ref)) _pendingAttachments.add(ref);
+      _attachmentDetails[ref] = PendingAttachment(
+          ref: ref, filename: name, sizeBytes: bytes.length);
       _notify();
       return ref;
     } catch (e) {
+      _attachError = _attachFailureMessage(e, name);
       _notify();
-      return _shortError(e);
+      return '';
     }
+  }
+
+  /// A failed attach has to say why. The old path returned a bare error string
+  /// that the composer discarded, so a failed attach looked like nothing had
+  /// happened and the SEND that followed carried the confusing error instead.
+  static String _attachFailureMessage(Object e, String name) {
+    if (e is GatewayError) {
+      if (e.code == 4001) {
+        return 'Attaching $name failed: the gateway no longer recognises this '
+            'session. Open the conversation again and retry.';
+      }
+      if (e.code == 413 || e.code == 1009) {
+        return 'Attaching $name failed: the gateway rejected the size.';
+      }
+      return 'Attaching $name failed: ${e.message}';
+    }
+    return 'Attaching $name failed: $e';
+  }
+
+  /// ~2s per MB on top of the normal ceiling, capped at ten minutes.
+  static int _attachTimeoutMs(int bytes) {
+    final mb = bytes ~/ (1024 * 1024);
+    return (120000 + mb * 2000).clamp(120000, 600000);
   }
 
   /// Remove a pending attachment.  For image refs (non-`@file:`) this calls
@@ -3812,6 +4004,7 @@ class ChatStore extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _eventSub?.cancel();
+    _requestSub?.cancel();
     _sessRefreshTimer?.cancel();
     // Defensive native cleanup for app/model teardown paths that bypass the
     // explicit Disconnect/Quit action. Manifest stopWithTask remains a

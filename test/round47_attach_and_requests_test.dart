@@ -1,0 +1,336 @@
+import 'dart:async';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:talaria/src/gateway/client.dart';
+import 'package:talaria/src/gateway/config.dart';
+import 'package:talaria/src/store/chat_store.dart';
+
+/// Round 47: two reported defects that turned out to be the same class of
+/// problem on different surfaces — the app could not tell a REQUEST apart from
+/// a RESPONSE, and it discarded the result of an attach.
+///
+///   1. Attaching a file: no confirmation, then "session isn't found" on send.
+///      The attach RPC had no recovery from a stale runtime id (every other
+///      transcript RPC did), it returned a bare error string the composer threw
+///      away, and there was no size ceiling to explain a rejected large file.
+///   2. Approvals and the sudo password prompt could never appear. The gateway
+///      asks for both with server→client REQUEST frames; the client treated
+///      every frame carrying an `id` as a response to one of its own calls,
+///      found no pending call, and returned — dropping the request silently
+///      while the agent waited for its timeout.
+final _cfg = GatewayConfig(url: 'http://localhost:1');
+
+class FakeGateway extends GatewayClient {
+  FakeGateway() : super(_cfg);
+
+  final _events = StreamController<GatewayEvent>.broadcast();
+  final _requests = StreamController<ServerRequest>.broadcast();
+
+  final List<Map<String, dynamic>> replies = [];
+  final Map<String, List<Map<String, dynamic>>> calls = {};
+  Object? failOnce;
+  int failCount = 0;
+
+  @override
+  GwConnectionState get state => GwConnectionState.open;
+  @override
+  Stream<GatewayEvent> get events => _events.stream;
+  @override
+  Stream<GwConnectionState> get stateChanges => const Stream.empty();
+  @override
+  Stream<ServerRequest> get serverRequests => _requests.stream;
+  @override
+  Future<void> connect({bool isReconnect = false}) async {}
+
+  @override
+  void respondToServerRequest(Object id, Map<String, dynamic> result) {
+    replies.add({'id': id, 'result': result});
+  }
+
+  @override
+  Future<Map<String, dynamic>> request(String method,
+      [Map<String, dynamic> params = const {}, int timeoutMs = 120000]) async {
+    calls.putIfAbsent(method, () => []).add(params);
+    if (failOnce != null && failCount > 0) {
+      failCount--;
+      throw failOnce!;
+    }
+    if (method == 'session.create' || method == 'session.resume') {
+      return {'session_id': 'sid-live'};
+    }
+    if (method == 'file.attach') {
+      return {'ref_text': '@file:staged/report.pdf', 'name': 'report.pdf'};
+    }
+    return const {};
+  }
+
+  void pushEvent(GatewayEvent ev) => _events.add(ev);
+  void pushRequest(ServerRequest req) => _requests.add(req);
+
+  @override
+  Future<void> dispose() async {
+    await _events.close();
+    await _requests.close();
+    await super.dispose();
+  }
+}
+
+ChatStore fresh(FakeGateway gw) => ChatStore(config: _cfg, client: gw);
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  // ── 0. Classifying an inbound frame: THE defect ──────────────────
+  // A request and a response to our own call both carry `id`. Only a request
+  // carries `method`. Getting this wrong is what dropped every approval.
+
+  test('an approval frame is a request, not a response', () {
+    // The exact wire shape the gateway writes (server_requests.py:56).
+    final req = serverRequestFromFrame(const <String, dynamic>{
+      'jsonrpc': '2.0',
+      'id': 41,
+      'method': 'approval',
+      'params': {
+        'request_id': 'req-1',
+        'command': 'rm -rf /tmp/x',
+        'tool_name': 'terminal',
+        'choices': ['once', 'session', 'always', 'deny'],
+      },
+    });
+    expect(req, isNotNull);
+    expect(req!.method, 'approval');
+    expect(req.requestId, 'req-1');
+    expect(req.approvalChoices, ['once', 'session', 'always', 'deny']);
+  });
+
+  test('a response to one of our own calls is not a request', () {
+    expect(serverRequestFromFrame(const <String, dynamic>{
+      'id': 3,
+      'result': {'ok': true},
+    }), isNull);
+  });
+
+  test('an event is not a request', () {
+    expect(serverRequestFromFrame(const <String, dynamic>{
+      'method': 'event',
+      'params': {'type': 'message.delta'},
+    }), isNull);
+  });
+
+  test('a frame without an id is not a request', () {
+    expect(serverRequestFromFrame(const <String, dynamic>{
+      'method': 'approval',
+      'params': <String, dynamic>{},
+    }), isNull);
+  });
+
+  test('sudo expects one string, clarify does not', () {
+    final sudo = serverRequestFromFrame(const <String, dynamic>{
+      'id': 9,
+      'method': 'sudo',
+      'params': {'command': 'sudo systemctl restart nginx'},
+    });
+    expect(sudo!.wantsValue, isTrue);
+    final clarify = serverRequestFromFrame(const <String, dynamic>{
+      'id': 10,
+      'method': 'clarify',
+      'params': {'question': 'which one?'},
+    });
+    expect(clarify!.wantsValue, isFalse);
+  });
+
+  // ── 1. Attaching a file ──────────────────────────────────────────
+
+  test('a successful attach is reported with its reference', () async {
+    final gw = FakeGateway();
+    final store = fresh(gw);
+    addTearDown(store.dispose);
+
+    final ref = await store.attachFileBytes(
+        List<int>.filled(32, 7), name: 'report.pdf');
+
+    expect(ref, '@file:staged/report.pdf');
+    expect(store.attachError, isNull);
+    expect(store.attachmentDetails.map((a) => a.filename), contains('report.pdf'));
+  });
+
+  test('a stale runtime id is recovered, not reported as session-not-found',
+      () async {
+    final gw = FakeGateway();
+    final store = fresh(gw);
+    addTearDown(store.dispose);
+
+    // Establish a stored conversation, then make the first attach fail the way
+    // a restarted gateway does.
+    await store.resumeSession('stored-1', silent: true);
+    gw.failOnce = GatewayError('session not found', code: 4001);
+    gw.failCount = 1;
+
+    final ref =
+        await store.attachFileBytes(List<int>.filled(16, 1), name: 'a.txt');
+
+    // Recovered and retried rather than surfacing the bare session error.
+    expect(ref, isNotEmpty);
+    expect(store.attachError, isNull);
+    expect(gw.calls['file.attach']!.length, 2,
+        reason: 'the first attempt 4001s, the retry succeeds');
+  });
+
+  test('a failed attach says why and yields no reference', () async {
+    final gw = FakeGateway();
+    final store = fresh(gw);
+    addTearDown(store.dispose);
+
+    gw.failOnce = GatewayError('boom', code: 5000);
+    gw.failCount = 9;
+
+    final ref =
+        await store.attachFileBytes(List<int>.filled(16, 1), name: 'notes.txt');
+
+    // Returning an error string as though it were a reference is what made the
+    // SEND look like the broken step: nothing said the attach had failed.
+    expect(ref, isEmpty);
+    expect(store.attachError, contains('notes.txt'));
+    expect(store.attachmentDetails, isEmpty);
+    store.clearAttachError();
+    expect(store.attachError, isNull);
+  });
+
+  test('an empty file is refused before any request', () async {
+    final gw = FakeGateway();
+    final store = fresh(gw);
+    addTearDown(store.dispose);
+
+    final ref = await store.attachFileBytes(<int>[], name: 'empty.txt');
+    expect(ref, isEmpty);
+    expect(store.attachError, contains('empty'));
+    expect(gw.calls.containsKey('file.attach'), isFalse);
+  });
+
+  test('the size ceiling sits below the gateway frame limit', () {
+    // The gateway raises its websocket frame limit for attachments to 384 MiB
+    // (hermes_cli/web_server.py::_DESKTOP_ATTACHMENT_WS_MAX_BYTES) and a data
+    // URL inflates the bytes by 4/3, so the file ceiling must leave room.
+    const gatewayFrameLimit = 384 * 1024 * 1024;
+    expect(ChatStore.maxAttachBytes, lessThan(gatewayFrameLimit));
+    expect(ChatStore.maxAttachBytes * 4 ~/ 3, lessThan(gatewayFrameLimit));
+  });
+
+  test('sizes read as sizes', () {
+    expect(ChatStore.humanSize(512), '512 bytes');
+    expect(ChatStore.humanSize(2048), '2 KB');
+    expect(ChatStore.humanSize(5 * 1024 * 1024), '5.0 MB');
+    expect(ChatStore.humanSize(3 * 1024 * 1024 * 1024), '3.0 GB');
+  });
+
+  // ── 2. Requests the gateway is blocked on ────────────────────────
+
+  test('an approval request arms the existing pending-request card', () async {
+    final gw = FakeGateway();
+    final store = fresh(gw);
+    addTearDown(store.dispose);
+
+    gw.pushRequest(serverRequestFromFrame(const <String, dynamic>{
+      'id': 7,
+      'method': 'approval',
+      'params': {
+        'request_id': 'req-abc',
+        'command': 'rm -rf /tmp/x',
+        'tool_name': 'terminal',
+        'choices': ['once', 'session', 'always', 'deny'],
+      },
+    })!);
+    await Future<void>.delayed(Duration.zero);
+
+    // Fed through the SAME state the clarify/approval card already renders and
+    // answers through the RPC that requires a request_id.
+    expect(store.pendingRequest, isNotNull);
+    expect(store.pendingRequest!.type, 'approval.request');
+    expect(store.pendingRequest!.payload['request_id'], 'req-abc');
+    expect(store.statusLine, 'Waiting for your input…');
+  });
+
+  test('a sudo prompt is held and its value goes straight back', () async {
+    final gw = FakeGateway();
+    final store = fresh(gw);
+    addTearDown(store.dispose);
+
+    gw.pushRequest(serverRequestFromFrame(const <String, dynamic>{
+      'id': 11,
+      'method': 'sudo',
+      'params': {'command': 'sudo systemctl restart nginx'},
+    })!);
+    await Future<void>.delayed(Duration.zero);
+    expect(store.pendingValueRequest?.method, 'sudo');
+
+    store.respondValue('secret-value');
+    expect(store.pendingValueRequest, isNull);
+    expect(gw.replies.single['id'], 11);
+    expect((gw.replies.single['result'] as Map)['value'], 'secret-value');
+  });
+
+  test('a secret prompt names its env var and answers the same way', () async {
+    final gw = FakeGateway();
+    final store = fresh(gw);
+    addTearDown(store.dispose);
+
+    gw.pushRequest(serverRequestFromFrame(const <String, dynamic>{
+      'id': 12,
+      'method': 'secret',
+      'params': {'env_var': 'OPENAI_API_KEY', 'prompt': 'Paste the key'},
+    })!);
+    await Future<void>.delayed(Duration.zero);
+    expect(store.pendingValueRequest?.params['env_var'], 'OPENAI_API_KEY');
+
+    store.respondValue('sk-not-a-real-key');
+    expect((gw.replies.single['result'] as Map)['value'], 'sk-not-a-real-key');
+  });
+
+  test('a prompt this client cannot serve is answered, never left hanging',
+      () async {
+    final gw = FakeGateway();
+    final store = fresh(gw);
+    addTearDown(store.dispose);
+
+    // A GUI read is meaningless on a phone, but an unanswered request parks the
+    // agent until the gateway's own timeout, which looks like a hung turn.
+    gw.pushRequest(serverRequestFromFrame(const <String, dynamic>{
+      'id': 13,
+      'method': 'window.read',
+      'params': <String, dynamic>{},
+    })!);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(gw.replies.single['id'], 13);
+    expect((gw.replies.single['result'] as Map)['value'], '');
+    expect(store.pendingValueRequest, isNull);
+    expect(store.pendingRequest, isNull);
+  });
+
+  // ── 3. Is /yolo actually on? ─────────────────────────────────────
+
+  test('the effective approval bypass comes from the gateway', () async {
+    final gw = FakeGateway();
+    final store = fresh(gw);
+    addTearDown(store.dispose);
+    await store.resumeSession('stored-1', silent: true);
+
+    expect(store.yoloActive, isFalse);
+    gw.pushEvent(const GatewayEvent(
+      type: 'session.info',
+      sessionId: 'sid-live',
+      payload: {'yolo': true, 'model': 'm'},
+    ));
+    await Future<void>.delayed(Duration.zero);
+    expect(store.yoloActive, isTrue,
+        reason: 'typing /yolo is not the same as approvals being skipped');
+
+    gw.pushEvent(const GatewayEvent(
+      type: 'session.info',
+      sessionId: 'sid-live',
+      payload: {'yolo': false},
+    ));
+    await Future<void>.delayed(Duration.zero);
+    expect(store.yoloActive, isFalse);
+  });
+}

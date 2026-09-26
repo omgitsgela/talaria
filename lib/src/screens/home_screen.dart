@@ -15,6 +15,7 @@ import '../store/chat_store.dart';
 import '../app_scope.dart';
 import '../widgets/context_meter.dart';
 import '../widgets/message_bubble.dart';
+import '../widgets/gateway_prompts.dart';
 import '../widgets/queued_prompt_strip.dart';
 import '../widgets/attachment_strip.dart';
 import '../media/image_attachment.dart';
@@ -2209,9 +2210,25 @@ class _ComposerState extends State<_Composer> {
     final files = await FilePicker.pickFiles(type: FileType.any);
     if (files.isEmpty) return;
     final f = files.first;
-    final bytes = await f.readAsBytes();
     final name = f.name.isEmpty ? 'file' : f.name;
-    await store.attachFileBytes(bytes, name: name);
+    // The size ceiling is enforced in the store, which is where the bytes end
+    // up: it refuses anything past the gateway's single-frame limit and says
+    // so, instead of the old silent failure.
+    final bytes = await f.readAsBytes();
+    final ref = await store.attachFileBytes(bytes, name: name);
+    if (!mounted) return;
+    if (ref.isEmpty) {
+      // Say why. The old path discarded the result entirely, so a failed
+      // attach looked like nothing happened.
+      final why = store.attachError ?? 'Could not attach $name.';
+      store.clearAttachError();
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(why)));
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text('Attached $name (${ChatStore.humanSize(bytes.length)})'),
+    ));
   }
 
   Future<void> _toggleVoice() async {
@@ -2227,6 +2244,15 @@ class _ComposerState extends State<_Composer> {
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // Requests the gateway is BLOCKED on: nothing else in the app can
+            // surface these, and until one is answered the turn sits until the
+            // gateway's own timeout.
+            if (store.yoloActive) const YoloBanner(),
+            if (store.pendingValueRequest != null)
+              SecretPromptCard(
+                request: store.pendingValueRequest!,
+                onSubmit: store.respondValue,
+              ),
             QueuedPromptStrip(
               prompts: store.queuedPrompts,
               editingId: store.editingQueuedId,

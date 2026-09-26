@@ -3,6 +3,28 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.3.5
+
+### build 44
+- **You can now authorize things from the app.** Approvals and the sudo password prompt could never
+  appear, because the gateway asks for both with server→client REQUEST frames and the app treated every
+  frame carrying an `id` as a reply to one of its own calls. It found no matching call, discarded the
+  request, and the turn waited out the gateway's timeout. The app now answers that channel: an approval
+  raises the existing card with its choices and its (server-redacted) command, a sudo or secret prompt
+  appears as a masked field whose value goes straight to the gateway and is never stored, and anything
+  the phone cannot serve is declined immediately so the agent never hangs. (#24)
+- **`/yolo` now says whether it is actually on.** The gateway skips approvals when ANY of three things is
+  true: the session flag `/yolo` sets, the process-wide flag, or `approvals.mode: off`. Typing `/yolo`
+  successfully therefore never answered the real question. The app reads the gateway's own computed
+  answer and shows a banner while approvals are off. (#24)
+- **Attaching a file no longer fails silently.** The attach asked the gateway for a session that could be
+  stale (the gateway answers 4001 after a restart), had no recovery, and then returned the error text as
+  if it were an attachment reference, which the composer discarded. So nothing confirmed the file, and
+  the SEND reported the session error about the wrong step. Attach now recovers from a stale session and
+  retries, reports success with the filename and size, and reports a failure with a reason. Files over
+  256 MiB are refused with an explanation instead of dropping the connection, and a large upload is
+  allowed time proportional to its size rather than a flat two minutes. (#23)
+
 ## 1.3.4
 
 ### build 43

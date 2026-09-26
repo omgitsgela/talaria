@@ -53,6 +53,84 @@ class GatewayError implements Exception {
 /// seq watermarks + `session.events.since` replay on reconnect, and
 /// full-jitter exponential backoff auto-reconnect (apps/desktop reconnect-backoff.ts:
 /// base 300ms, cap 15s, delay = random * min(cap, base * 2^attempt)).
+/// A request FROM the gateway that this client must ANSWER: an approval
+/// decision, a sudo password, a secret value.
+///
+/// The gateway writes these as ordinary JSON-RPC request frames
+/// (`{"jsonrpc":"2.0","id":N,"method":"approval","params":{...}}`) and holds
+/// the agent until the matching reply arrives or its own timeout fires. They
+/// carry an `id` exactly like a response to one of our calls does, which is why
+/// a client that treats every id-carrying frame as a response silently drops
+/// them and leaves the agent parked.
+///
+/// The method set is the gateway's `SERVER_REQUESTS` contract
+/// (`tui_gateway/contracts/server_requests.py`).
+class ServerRequest {
+  const ServerRequest({
+    required this.id,
+    required this.method,
+    this.params = const {},
+    this.sessionId,
+  });
+
+  final Object id;
+  final String method;
+  final Map<String, dynamic> params;
+  final String? sessionId;
+
+  /// The id of the exact approval this resolves.
+  String get requestId => (params['request_id'] ?? '').toString();
+
+  /// Choices the gateway will accept, e.g. once/session/always/deny.
+  List<String> get approvalChoices {
+    final raw = params['choices'];
+    if (raw is List) {
+      return raw.map((e) => e.toString()).toList(growable: false);
+    }
+    return const <String>['once', 'deny'];
+  }
+
+  /// True when the expected answer is one string under `value`: the sudo
+  /// password and secret prompts, and the vault/GUI reads.
+  bool get wantsValue => const <String>{
+        'sudo',
+        'secret',
+        'vault.unlock_prompt',
+        'vault.save_login',
+        'vault.code',
+        'terminal.read',
+        'preview.read',
+        'window.read',
+        'preview.act',
+        'tour',
+      }.contains(method);
+}
+
+/// Classify an inbound frame: a request FROM the gateway that we must answer,
+/// or null when it is a response to one of our own calls, or an event.
+///
+/// This one distinction is what the app got wrong. A request and a response both
+/// carry `id`; only a request carries `method`. Code that treats every
+/// id-carrying frame as a response finds no pending call and returns, which
+/// silently drops approvals and sudo prompts while the agent waits for its
+/// timeout. Extracted and pure so that mistake stays testable.
+ServerRequest? serverRequestFromFrame(Map<String, dynamic> frame) {
+  final id = frame['id'];
+  if (id == null || (id is! String && id is! int)) return null;
+  final method = frame['method'];
+  // `event` frames carry params but are one-way notifications, not requests.
+  if (method is! String || method == 'event') return null;
+  final rawParams = frame['params'];
+  final params =
+      rawParams is Map<String, dynamic> ? rawParams : const <String, dynamic>{};
+  return ServerRequest(
+    id: id,
+    method: method,
+    params: params,
+    sessionId: params['session_id'] as String?,
+  );
+}
+
 class GatewayClient {
   GatewayClient(this.config, {this.autoReconnect = true})
       : _rng = Random();
@@ -76,6 +154,7 @@ class GatewayClient {
   final _pending = <String, Completer<Map<String, dynamic>>>{};
   final _eventController = StreamController<GatewayEvent>.broadcast();
   final _stateController = StreamController<GwConnectionState>.broadcast();
+  final _requestController = StreamController<ServerRequest>.broadcast();
 
   IOWebSocketChannel? _channel;
   StreamSubscription? _sub;
@@ -120,6 +199,24 @@ class GatewayClient {
   /// All gateway events (every type). Subscribe and filter, or use
   /// [eventStreamFor].
   Stream<GatewayEvent> get events => _eventController.stream;
+
+  /// Requests from the gateway that need an ANSWER: approvals, sudo passwords
+  /// and secrets. The agent is blocked until each one is answered (see
+  /// [respondToServerRequest]).
+  Stream<ServerRequest> get serverRequests => _requestController.stream;
+
+  /// Answer a [ServerRequest]. Every request must be answered: one that is
+  /// ignored leaves the agent waiting for the gateway's own timeout, which
+  /// looks to the user like a hung turn.
+  void respondToServerRequest(Object id, Map<String, dynamic> result) {
+    final ch = _channel;
+    if (ch == null) return;
+    try {
+      ch.sink.add(jsonEncode({'jsonrpc': '2.0', 'id': id, 'result': result}));
+    } catch (_) {
+      // The socket is gone; the gateway's own timeout resolves it.
+    }
+  }
 
   /// Subscribe to one event type, e.g. 'message.delta'.
   Stream<GatewayEvent> eventStreamFor(String type) =>
@@ -349,6 +446,18 @@ class GatewayClient {
       return;
     }
     if (frameRaw is! Map<String, dynamic>) return;
+
+    // Request frame FROM the gateway. It carries an `id` exactly like a
+    // response to one of our calls does, so this test has to come FIRST: the
+    // old code treated every id-carrying frame as a response, found no matching
+    // pending call, and returned — silently discarding approvals and sudo
+    // prompts while the agent sat waiting for its timeout. A response never
+    // carries `method`.
+    final asRequest = serverRequestFromFrame(frameRaw);
+    if (asRequest != null) {
+      _requestController.add(asRequest);
+      return;
+    }
 
     // Request/response frame.
     final id = frameRaw['id'];
@@ -581,5 +690,6 @@ class GatewayClient {
     _rejectAll(GatewayError('disposed'));
     await _eventController.close();
     await _stateController.close();
+    await _requestController.close();
   }
 }

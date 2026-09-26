@@ -436,7 +436,7 @@ void main() {
           reason: 'failed attach must not add to pending list');
     });
 
-    test('attachFileBytes returns error on failure', () async {
+    test('attachFileBytes reports a failure and attaches nothing', () async {
       final gw = AttachmentGateway();
       gw.handle = (m, p) async => switch (m) {
         'file.attach' =>
@@ -448,7 +448,13 @@ void main() {
       await store.resumeSession('a');
 
       final result = await store.attachFileBytes([0x44], name: 'big.bin');
-      expect(result, contains('file too large'));
+      // Contract CORRECTED, not dropped: returning the error text as though it
+      // were an attachment reference is precisely what made a failed attach
+      // silent — the composer used the value as a ref, so nothing said it had
+      // failed and the SEND that followed carried the confusing error. A
+      // failure now yields no reference and an error the UI can show.
+      expect(result, isEmpty);
+      expect(store.attachError, contains('big.bin'));
       expect(store.pendingAttachments, isEmpty);
     });
   });
