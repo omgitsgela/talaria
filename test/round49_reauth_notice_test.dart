@@ -1,6 +1,5 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:talaria/src/gateway/config.dart';
 import 'package:talaria/src/gateway/oauth_flow.dart';
 
 /// Round 49: a gateway restart ends an OAuth session, so say so.
