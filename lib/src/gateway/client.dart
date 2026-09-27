@@ -246,6 +246,14 @@ class GatewayClient {
     if (_disposed) {
       throw GatewayError('gateway not connected');
     }
+    // Refuse a cleartext destination that is not local BEFORE opening a
+    // socket: pointing the app at a public host over plain http would put the
+    // session token and every prompt on the wire in the clear. This is a
+    // configuration problem, so it is reported rather than retried.
+    final refusal = config.cleartextRefusal;
+    if (refusal != null) {
+      throw GatewayError(refusal);
+    }
     _manualClose = false;
     _setState(isReconnect ? GwConnectionState.reconnecting : GwConnectionState.connecting);
     _connectInFlight = true;

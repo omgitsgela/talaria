@@ -3,6 +3,20 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.3.6
+
+### build 45
+- **Plain http is now scoped to your own network.** Google's published security guidance is not to enable
+  cleartext application-wide. A gateway the user chooses makes a blanket refusal unusable, and a blanket
+  allowance is what the guidance warns about, so the rule is by HOST instead. A private, loopback or
+  link-local destination may use plain http, because that traffic never leaves the local network,
+  including a bare LAN name such as `autumn` or a `.local`, `.lan`, `.internal` or `.home.arpa` name,
+  which is how a self-hosted box is normally reached. Anything else must be https. An address typed with
+  no scheme now takes the scheme its host deserves rather than silently defaulting to http, and pointing
+  the app at a public host over plain http is refused with an explanation instead of putting your token
+  and your prompts on the wire in the clear. This closes the single deviation from Google's published
+  criteria that the compliance audit found.
+
 ## 1.3.5
 
 ### build 44

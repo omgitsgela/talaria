@@ -1,3 +1,5 @@
+import 'host_policy.dart';
+
 /// Talaria gateway connection model.
 ///
 /// Talaria talks to a Hermes `serve` backend over the tui_gateway
@@ -35,12 +37,23 @@ class GatewayConfig {
   String get baseUrl {
     var u = url.trim();
     if (u.endsWith('/')) u = u.substring(0, u.length - 1);
-    if (!u.contains('://')) u = 'http://$u';
+    if (!u.contains('://')) {
+      // Pick the scheme from the host rather than assuming plain http
+      // everywhere: a LAN or loopback gateway is reached over http, but a
+      // public address must not be handed the token in the clear just because
+      // nobody typed a scheme. See host_policy.dart.
+      final host = u.split('/').first.split(':').first;
+      u = '${defaultSchemeForHost(host)}://$u';
+    }
     return u;
   }
 
   bool get usesToken => token.trim().isNotEmpty;
   bool get usesOAuth => oauthToken.trim().isNotEmpty;
+
+  /// Why this gateway address must not be used, or null when it is fine.
+  /// Only the cleartext case is judged: a public destination over plain http.
+  String? get cleartextRefusal => cleartextRefusalFor(baseUrl);
 
   /// `wss://` for https origins, `ws://` otherwise.
   String get wsBase {
