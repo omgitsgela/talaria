@@ -2356,8 +2356,17 @@ class _ComposerState extends State<_Composer> {
                         height: 96,
                         child: TextField(
                           controller: widget.controller,
-                          minLines: 1,
+                          // Fill the fixed-height box from the START. `minLines: 1`
+                          // made the field begin one line tall and grow as text was
+                          // typed, which read as the input resizing under the user.
+                          // `expands` fills the height the composer already
+                          // reserves, so the composer's total height is unchanged
+                          // and the transcript viewport still cannot resize while
+                          // text is being selected (the old thrash).
+                          expands: true,
+                          minLines: null,
                           maxLines: null,
+                          textAlignVertical: TextAlignVertical.top,
                           textCapitalization: TextCapitalization.sentences,
                           style: theme.textTheme.bodyLarge,
                           decoration: InputDecoration(

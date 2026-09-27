@@ -3,6 +3,15 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.3.9
+
+### build 48
+- **The message box starts at its full size.** It began one line tall and grew as you typed, which read as
+  the input resizing underneath you. The field now fills the height the composer already reserves from the
+  moment it appears, and text starts at the top rather than centred. The composer's total height is
+  unchanged, so the transcript viewport still cannot resize while text is being selected, which is what
+  caused the jump-to-bottom thrash in earlier builds. (#28)
+
 ## 1.3.8
 
 ### build 47
