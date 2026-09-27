@@ -1321,25 +1321,52 @@ class ChatStore extends ChangeNotifier {
 
   void _onServerRequest(ServerRequest req) {
     switch (req.method) {
-      case 'approval':
-        // Feed the EXISTING pending-request card rather than a second one: the
-        // app already renders approvals and clarifies from `_pendingRequest`,
-        // and answers them through the clarify/approval RPCs with a mandatory
-        // request_id. The card was never the missing piece; the channel was.
-        _pendingRequest = GatewayEvent(
-          type: 'approval.request',
-          sessionId: req.sessionId,
-          payload: req.params,
+      case 'approval': {
+        // An approval belongs to ONE conversation. The card is scoped to it:
+        // showing another session's decision in whatever conversation happens
+        // to be open would put a decision in front of the user for a
+        // conversation they are not looking at. Anything else arrives as a
+        // notification instead.
+        final mine = req.sessionId == null || req.sessionId == _activeSessionId;
+        if (mine) {
+          _pendingRequest = GatewayEvent(
+            type: 'approval.request',
+            sessionId: req.sessionId,
+            payload: req.params,
+          );
+          _statusLine = 'Waiting for your input…';
+        }
+        final command = (req.params['command'] ?? '').toString();
+        _pushNotification(
+          title: 'Hermes needs approval',
+          body: mine
+              ? (command.isEmpty ? 'A command is waiting for your decision.'
+                                 : command)
+              : 'A command is waiting for your decision in another conversation.',
+          tag: 'approval-${req.requestId}',
+          // Only a request for the ACTIVE session can be routed to a stored id;
+          // for another conversation we send no payload rather than a wrong one.
+          sessionId: mine ? _activeStoredSessionId : '',
         );
-        _statusLine = 'Waiting for your input…';
         _notify();
         return;
+      }
       case 'sudo':
       case 'secret':
       case 'vault.unlock_prompt':
       case 'vault.save_login':
       case 'vault.code':
         _pendingValueRequest = req;
+        // A password prompt the user never sees would hang the turn silently,
+        // so it always raises a notification as well as the in-composer card.
+        _pushNotification(
+          title: req.method == 'sudo' ? 'Sudo password needed' : 'A value is needed',
+          body: (req.params['prompt'] ?? req.params['command'] ?? '').toString(),
+          tag: 'value-${req.id}',
+          sessionId: req.sessionId == null || req.sessionId == _activeSessionId
+              ? _activeStoredSessionId
+              : '',
+        );
         _notify();
         return;
       case 'clarify':
@@ -1910,13 +1937,22 @@ class ChatStore extends ChangeNotifier {
   }
 
   void _pushNotification(
-      {required String title, required String body, String? tag}) {
+      {required String title,
+      required String body,
+      String? tag,
+      String? sessionId}) {
     // Fire and forget; notifier handles init state. Carry the STORED session
     // id as the tap payload — main._routeNotification resumes it. Without a
     // payload the whole tap-to-open path was dead (id always null). A fresh
     // draft has no stored id yet and simply does not route.
+    // [sessionId] overrides the active conversation's stored id, so a request
+    // that arrived for a DIFFERENT conversation routes to that one on tap
+    // rather than to whatever happens to be on screen.
     unawaited(_notifier.push(
-        title: title, body: body, tag: tag, sessionId: _activeStoredSessionId));
+        title: title,
+        body: body,
+        tag: tag,
+        sessionId: sessionId ?? _activeStoredSessionId));
   }
 
   // ── Transcript helpers ─────────────────────────────────────────────

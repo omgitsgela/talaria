@@ -333,4 +333,42 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(store.yoloActive, isFalse);
   });
+
+  // ── 4. An approval belongs to ONE conversation ───────────────────
+
+  test('an approval for another conversation does not appear in this one',
+      () async {
+    final gw = FakeGateway();
+    final store = fresh(gw);
+    addTearDown(store.dispose);
+    await store.resumeSession('stored-1', silent: true);
+
+    // Belongs to a different session: no card in the open conversation.
+    gw.pushRequest(serverRequestFromFrame(const <String, dynamic>{
+      'id': 71,
+      'method': 'approval',
+      'params': {
+        'request_id': 'r-other',
+        'session_id': 'sid-other',
+        'command': 'rm -rf /tmp/y',
+      },
+    })!);
+    await Future<void>.delayed(Duration.zero);
+    expect(store.pendingRequest, isNull,
+        reason: "another conversation's approval must not be shown in this one");
+
+    // Belongs to THIS session: the card appears, as before.
+    gw.pushRequest(serverRequestFromFrame(const <String, dynamic>{
+      'id': 72,
+      'method': 'approval',
+      'params': {
+        'request_id': 'r-mine',
+        'session_id': 'sid-live',
+        'command': 'rm -rf /tmp/z',
+      },
+    })!);
+    await Future<void>.delayed(Duration.zero);
+    expect(store.pendingRequest, isNotNull);
+    expect(store.pendingRequest!.payload['request_id'], 'r-mine');
+  });
 }

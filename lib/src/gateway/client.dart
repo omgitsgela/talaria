@@ -498,7 +498,12 @@ class GatewayClient {
       final ev = GatewayEvent.fromParams(frameRaw['params'] as Map<String, dynamic>);
       if (ev.type == 'gateway.ready') {
         final payload = ev.payload;
-        if (payload['heartbeat'] == true) _startHeartbeat();
+        // Start the liveness ping UNCONDITIONALLY. The gateway implements
+        // `gateway.ping` (tui_gateway/ws.py), but it does not advertise
+        // `heartbeat: true`, so gating on that flag meant the timer never ran
+        // and a silently dropped network left the app believing it was still
+        // connected, with no teardown and therefore no reconnect.
+        _startHeartbeat();
         if (payload['replay_epoch'] is String) {
           _adoptReplayEpoch(payload['replay_epoch'] as String);
         }

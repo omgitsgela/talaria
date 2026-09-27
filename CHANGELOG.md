@@ -3,6 +3,30 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.3.8
+
+### build 47
+- **An approval only appears in the conversation it belongs to.** The approval card was set into
+  whatever conversation happened to be open, without checking which session the request came from, so a
+  decision belonging to a background session could be presented as though it belonged to the one on
+  screen. It is now scoped to its session, and the case is covered by a test.
+- **Approvals and password prompts raise a notification.** Previously only the old event path notified;
+  the request path that actually carries approvals did not, so an approval arriving while the app was in
+  the background could be missed entirely. Both now notify. The notification carries the conversation it
+  belongs to, so a tap returns you to the right place. The tap payload was also wrong for requests from
+  other conversations: it always used the ACTIVE conversation's id. It now either names the request's own
+  conversation or deliberately carries none, rather than a wrong one.
+- **The app can now notice a dropped network.** The liveness ping only started when the gateway
+  advertised `heartbeat` in its ready message, and this gateway does not, so the timer never ran: a
+  silently dropped connection left the app believing it was connected, nothing tore the socket down, and
+  the reconnect loop therefore never ran either. The gateway does implement `gateway.ping`, so the ping
+  now always runs. With no traffic for 45 seconds the socket is closed and the existing backoff reconnect
+  takes over.
+- **The composer's buttons now form a 2x2 block**, with the microphone above the paperclip as asked, and
+  the message box takes the width that the old single row of three buttons was using. The field's height
+  is deliberately unchanged: it is fixed so the transcript's viewport does not resize while you select
+  text, which used to cause a jump-to-bottom thrash.
+
 ## 1.3.7
 
 ### build 46

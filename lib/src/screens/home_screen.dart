@@ -2321,17 +2321,28 @@ class _ComposerState extends State<_Composer> {
                         ),
                       ],
                     ),
-                    IconButton(
-                      tooltip: 'Attach file',
-                      icon: const Icon(Icons.attach_file),
-                      onPressed: store.sendingAttachments ? null : _attachFile,
-                    ),
-                    IconButton(
-                      tooltip:
-                          store.voiceOn ? 'Voice off' : 'Voice (push-to-talk)',
-                      icon: Icon(store.voiceOn ? Icons.mic : Icons.mic_none),
-                      color: store.voiceOn ? theme.colorScheme.primary : null,
-                      onPressed: _toggleVoice,
+                    // Second column of the 2x2 block: the microphone sits
+                    // ABOVE the paperclip. Two columns of two buttons read as a
+                    // square beside the field, and they occupy less width than
+                    // a single row of three, which the field takes instead.
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          tooltip: store.voiceOn
+                              ? 'Voice off'
+                              : 'Voice (push-to-talk)',
+                          icon: Icon(store.voiceOn ? Icons.mic : Icons.mic_none),
+                          color: store.voiceOn ? theme.colorScheme.primary : null,
+                          onPressed: _toggleVoice,
+                        ),
+                        IconButton(
+                          tooltip: 'Attach file',
+                          icon: const Icon(Icons.attach_file),
+                          onPressed:
+                              store.sendingAttachments ? null : _attachFile,
+                        ),
+                      ],
                     ),
                     Expanded(
                       // The input has a FIXED height: it never resizes the
