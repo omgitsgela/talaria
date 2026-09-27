@@ -38,8 +38,48 @@ class OAuthTokenStore {
     }
   }
 
-  Future<void> save(String baseUrl, NativeTokenSet set) =>
-      _storage.write(key: _keyFor(baseUrl), value: jsonEncode(set.toJson()));
+  Future<void> save(String baseUrl, NativeTokenSet set) async {
+    await _storage.write(
+        key: _keyFor(baseUrl), value: jsonEncode(set.toJson()));
+    // A successful sign-in is the only thing that clears the "sign in again"
+    // state, so it cannot go stale in the other direction.
+    await clearReauthNeeded(baseUrl);
+  }
+
+  // ── Why a sign-in is needed (gateway restarts end a session) ──────
+  // A gateway restart ends the server-side OAuth session, so the stored token
+  // stops working. The app already detected that (a 401 `session_expired` on
+  // refresh drops the token set), but nothing told the SIGN-IN SCREEN, which
+  // kept pre-filling the dead token from the config with no explanation. The
+  // reason is recorded here so the screen can say what happened.
+  static const _reauthPrefix = 'talaria.reauth.';
+
+  String _reauthKeyFor(String baseUrl) => '$_reauthPrefix${_keyFor(baseUrl)}';
+
+  /// Record that [baseUrl] needs a fresh sign-in, and why.
+  Future<void> markReauthNeeded(String baseUrl, String reason) async {
+    try {
+      await _storage.write(key: _reauthKeyFor(baseUrl), value: reason);
+    } catch (_) {
+      // Best effort: the screen falls back to the generic wording.
+    }
+  }
+
+  /// The recorded reason a sign-in is needed, or null when none is recorded.
+  Future<String?> reauthNeededReason(String baseUrl) async {
+    try {
+      final raw = await _storage.read(key: _reauthKeyFor(baseUrl));
+      return (raw == null || raw.isEmpty) ? null : raw;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> clearReauthNeeded(String baseUrl) async {
+    try {
+      await _storage.delete(key: _reauthKeyFor(baseUrl));
+    } catch (_) {}
+  }
 
   Future<void> _delete(String baseUrl) async {
     try {
@@ -202,8 +242,11 @@ class OAuthFlowRunner {
         )
         .timeout(const Duration(seconds: 20));
     if (res.statusCode == 401) {
-      // Session expired — drop the stale set; caller should re-auth.
+      // Session expired — drop the stale set and record why, so the sign-in
+      // screen can explain it instead of showing a token that no longer works.
+      // A gateway restart is the usual cause: it ends the server-side session.
       await store.clear(baseUrl);
+      await store.markReauthNeeded(baseUrl, 'gateway_restart');
       return null;
     }
     if (res.statusCode != 200) {
@@ -219,8 +262,11 @@ class OAuthFlowRunner {
     return refreshed;
   }
 
-  Future<void> signOut(GatewayConfig config) =>
-      store.clear(config.baseUrl);
+  Future<void> signOut(GatewayConfig config) async {
+    await store.clear(config.baseUrl);
+    // A deliberate sign-out is not a reason to show a "sign in again" banner.
+    await store.clearReauthNeeded(config.baseUrl);
+  }
 
   /// Resolve an effective access token for [config] using the desktop's
   /// "stored -> refreshed -> interactive" chain:

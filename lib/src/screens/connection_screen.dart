@@ -6,6 +6,7 @@ import '../app_version.dart';
 import '../gateway/config.dart';
 import '../gateway/http_service.dart';
 import '../gateway/native_oauth.dart';
+import '../gateway/oauth_flow.dart';
 import '../store/app_model.dart';
 
 /// First-run / reconnect screen. Mirrors the desktop's "Connect to
@@ -13,6 +14,10 @@ import '../store/app_model.dart';
 /// proxy headers, with a live probe before committing.
 class ConnectionScreen extends StatefulWidget {
   const ConnectionScreen({super.key, required this.model, this.onConnected});
+
+  /// Test seam, matching [httpFactoryForTest]: lets a widget test supply the
+  /// token store instead of touching platform secure storage.
+  static OAuthTokenStore? oauthStoreForTest;
   final AppModel model;
   final VoidCallback? onConnected;
 
@@ -42,6 +47,13 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
   String _oauthStatus = '';
   String _oauthError = '';
 
+  /// Recorded reason a sign-in is needed, e.g. after a gateway restart ended
+  /// the previous session. Empty when nothing is recorded.
+  String _reauthReason = '';
+
+  late final OAuthTokenStore _oauthStore =
+      ConnectionScreen.oauthStoreForTest ?? OAuthTokenStore();
+
   static const _defaultUrl = 'http://gw.example.internal:9119';
 
   /// Debounce for the quiet auth-flow discovery that runs while the user types
@@ -59,10 +71,42 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
     _headerValue = TextEditingController();
     if (c?.usesOAuth ?? false) _authToken = false;
     _url.addListener(_onUrlChanged);
+    unawaited(_loadReauthState());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_discoverFlows());
     });
   }
+
+  /// Read the recorded reason a sign-in is needed for the saved gateway.
+  ///
+  /// A gateway restart ends the server-side OAuth session, so the stored token
+  /// stops working. The token store already records that; this makes the screen
+  /// say so, and stops it presenting the dead token as though it were live.
+  Future<void> _loadReauthState() async {
+    final c = widget.model.saved;
+    if (c == null || !c.usesOAuth) return;
+    String? reason;
+    try {
+      reason = await _oauthStore.reauthNeededReason(c.baseUrl);
+    } catch (_) {
+      return;
+    }
+    if (!mounted || reason == null || reason.isEmpty) return;
+    // Promote to a non-nullable local: a variable captured by the closure
+    // below is not promoted by the null check.
+    final why = reason;
+    setState(() {
+      _reauthReason = why;
+      _authToken = false;
+      // Never show an ended session's token as if it were usable.
+      _bearer.clear();
+    });
+  }
+
+  String get _reauthMessage => _reauthReason == 'gateway_restart'
+      ? 'The gateway was restarted, which ends a signed-in session. Sign in '
+          'again to reconnect.'
+      : 'Your saved sign-in is no longer valid. Sign in again to reconnect.';
 
   @override
   void dispose() {
@@ -317,6 +361,34 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                           ),
                         const SizedBox(height: 14),
                       ],
+                      if (_reauthReason.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: Container(
+                            key: const ValueKey('reauth_needed_banner'),
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: theme.colorScheme.errorContainer
+                                  .withValues(alpha: 0.35),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                  color: theme.colorScheme.error
+                                      .withValues(alpha: 0.5)),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(Icons.lock_reset,
+                                    size: 18,
+                                    color: theme.colorScheme.error),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(_reauthMessage,
+                                      style: theme.textTheme.bodySmall),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                       TextFormField(
                         controller: _bearer,
                         decoration: InputDecoration(

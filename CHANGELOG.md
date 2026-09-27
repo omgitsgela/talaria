@@ -3,6 +3,21 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.3.7
+
+### build 46
+- **The sign-in screen now says WHY it wants you to sign in again.** A gateway restart ends a
+  server-side OAuth session, so the stored token stops working. The app already detected that, but the
+  screen never learned it, and kept pre-filling the dead token from its saved configuration, so a session
+  that had ENDED looked exactly like a live one. Two copies of the token, one of them stale. The reason is
+  now recorded when the session ends, and the screen explains it: "The gateway was restarted, which ends a
+  signed-in session. Sign in again to reconnect." The ended token is no longer presented as usable, and
+  the notice clears on a successful sign-in and on a deliberate sign-out. (#26)
+- Known gap, stated rather than hidden: the store-level behaviour is covered by three tests in
+  `test/round49_reauth_notice_test.dart`, but the banner's RENDERING is not covered by a test. The
+  connection screen schedules HTTP timeout timers that fail a widget test at teardown, so a widget test
+  for it needs that screen's auth-flow discovery moved onto an injectable timeline first.
+
 ## 1.3.6
 
 ### build 45

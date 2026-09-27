@@ -1,0 +1,1 @@
+The sign-in screen now explains when a gateway restart has ended your session, instead of showing a token that no longer works. It says plainly that a restart ends a signed-in session and asks you to sign in again, and an ended token is no longer shown as though it were live. The notice clears after a successful sign-in, or after you sign out on purpose.
