@@ -87,6 +87,21 @@ class NativeOAuthService {
   }
 
   /// Check whether an already-fetched auth-flows list advertises native_pkce.
+  /// Whether to offer "Sign in with Hermes".
+  ///
+  /// [nativeAvailable] comes from asking the gateway which flows it supports,
+  /// but that probe needs a working credential, which is exactly what is
+  /// missing when a reauth is needed. Gating the button on the probe alone made
+  /// the reauth banner a dead end: the message appeared and there was no way to
+  /// act on it. A recorded reauth therefore always offers the action, and a
+  /// gateway that genuinely cannot do the native flow answers the attempt with
+  /// a clear error instead.
+  static bool shouldOfferNativeSignIn({
+    required bool nativeAvailable,
+    required bool reauthNeeded,
+  }) =>
+      nativeAvailable || reauthNeeded;
+
   static bool flowsSupportNativeFlow(Iterable<String> flows) =>
       flows.contains(nativeFlowId);
 

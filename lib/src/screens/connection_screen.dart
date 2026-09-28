@@ -329,7 +329,10 @@ class _ConnectionScreenState extends State<ConnectionScreen> {
                       // it, but the field below stays: a bearer token minted
                       // elsewhere is a legitimate way in, and hiding the field
                       // for exactly those gateways left no way to use one.
-                      if (_nativeAvailable) ...[
+                      if (NativeOAuthService.shouldOfferNativeSignIn(
+                        nativeAvailable: _nativeAvailable,
+                        reauthNeeded: _reauthReason.isNotEmpty,
+                      )) ...[
                         FilledButton.tonalIcon(
                           onPressed:
                               _oauthLoading || _connecting ? null : _signInOAuth,

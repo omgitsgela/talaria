@@ -20,10 +20,10 @@ library;
 /// out of date. `round4_fixes_test` asserts the shape of the label rather than a
 /// literal, which is why the drift went unnoticed; the shape check cannot catch
 /// a version that simply never moved.
-const String kAppVersion = '1.3.9';
+const String kAppVersion = '1.3.10';
 
 /// Monotonic build number (matches the pubspec `+N`).
-const int kAppBuildCode = 48;
+const int kAppBuildCode = 49;
 
 /// One-line tagline for the splash.
 const String kAppTagline = 'Your gateway, in your pocket';

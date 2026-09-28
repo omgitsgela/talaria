@@ -3,6 +3,18 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.3.10
+
+### build 49
+- **The sign-in button is no longer missing when a reauth is needed.** When the app detected that an OAuth
+  token had stopped working, the warning appeared in place of the button, leaving no way to actually sign
+  in again and get a new token. The button was rendered only when the app had confirmed the gateway
+  supports the native flow, and confirming it requires asking the gateway with a working credential --
+  precisely what has just expired. The probe fails, the flag stays false, and the action disappears at the
+  exact moment it is needed. A recorded reauth now always offers the sign-in action; a gateway that
+  genuinely cannot do the native flow answers the attempt with a clear error instead of an unreachable
+  message. The rule lives in a pure function with tests for all three cases. (#29)
+
 ## 1.3.9
 
 ### build 48

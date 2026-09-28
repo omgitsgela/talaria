@@ -1,0 +1,1 @@
+Fixed: when a saved OAuth token expired, the sign-in button could disappear, leaving the reauth warning with no way to act on it. The button is now always available when a sign-in is needed.
