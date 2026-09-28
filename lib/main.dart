@@ -178,7 +178,13 @@ class _TalaryAppState extends State<TalaryApp> {
     // routing id is a STORED session id (that is what a notification payload
     // carries), so compare against the stored id — the runtime session id is
     // a different space and would never match.
-    if (id != store.activeStoredSessionId) {
+    // Resume unless the conversation on screen is genuinely LIVE. Matching the
+    // stored id is NOT enough: after a cold start the app can be showing this
+    // very conversation from its history while its runtime session no longer
+    // exists, so skipping the resume left every reply rejected with 4001
+    // "session not found". A genuinely live turn is still never reset, which is
+    // what this guard is for.
+    if (id != store.activeStoredSessionId || !store.activeSessionIsLive) {
       unawaited(store.resumeSession(id));
     }
   }

@@ -31,6 +31,15 @@ class FakeGateway extends GatewayClient {
   Object? failOnce;
   int failCount = 0;
 
+  /// Set to model the gateway having REAPED the runtime session (a dropped
+  /// socket does this). The dead id stays dead: every runtime-scoped RPC is
+  /// rejected with 4001 until the client re-attaches, at which point a genuinely
+  /// fresh runtime id is handed out. A one-shot failure cannot model this
+  /// because the send path's own retry loop would absorb it by retrying the
+  /// SAME dead id, which is precisely the bug being fixed.
+  bool staleRuntime = false;
+  String? _freshSid;
+
   @override
   GwConnectionState get state => GwConnectionState.open;
   @override
@@ -56,7 +65,14 @@ class FakeGateway extends GatewayClient {
       throw failOnce!;
     }
     if (method == 'session.create' || method == 'session.resume') {
-      return {'session_id': 'sid-live'};
+      if (staleRuntime) _freshSid = 'sid-fresh';
+      return {'session_id': staleRuntime ? 'sid-fresh' : 'sid-live'};
+    }
+    if (staleRuntime) {
+      final sid = params['session_id'];
+      if (sid != _freshSid) {
+        throw GatewayError('session not found', code: 4001);
+      }
     }
     if (method == 'file.attach') {
       return {'ref_text': '@file:staged/report.pdf', 'name': 'report.pdf'};
@@ -334,7 +350,35 @@ void main() {
     expect(store.yoloActive, isFalse);
   });
 
-  // ── 4. An approval belongs to ONE conversation ───────────────────
+  // ── 4. A reply after a notification tap must recover a dead runtime ──
+
+  test('a reply survives a stale runtime session (the notification-tap case)',
+      () async {
+    final gw = FakeGateway();
+    final store = fresh(gw);
+    addTearDown(store.dispose);
+    // Open the conversation, as a notification tap does.
+    await store.resumeSession('stored-1', silent: true);
+    // Now the gateway reaps that runtime session (the socket dropped while the
+    // app was backgrounded). The transcript is still on screen from history and
+    // _activeSessionId is a dead id, so EVERY submit against it answers 4001
+    // until the client re-attaches under a fresh runtime id.
+    gw.staleRuntime = true;
+
+    final sent = await store.send('are you there?');
+
+    // The send must heal the stale id and land instead of failing with 4001.
+    // NOTE: the fake does not record a call it rejected, so the number of
+    // recorded submits cannot count the failed attempt. The proof that the
+    // recovery ran is that the send SUCCEEDED at all after a programmed 4001,
+    // plus the re-attach the recovery issues.
+    expect(sent, isTrue, reason: 'the reply must succeed after recovery');
+    expect(gw.calls['session.resume'], isNotEmpty,
+        reason: 'the stale runtime id must be re-attached under a fresh one');
+    expect(gw.calls['prompt.submit']!.last['text'], 'are you there?');
+  });
+
+  // ── 5. An approval belongs to ONE conversation ───────────────────
 
   test('an approval for another conversation does not appear in this one',
       () async {

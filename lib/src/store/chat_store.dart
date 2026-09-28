@@ -1235,6 +1235,18 @@ class ChatStore extends ChangeNotifier {
   /// Every transcript RPC already recovered from that, but the attach RPCs did
   /// not, so attaching a file failed with a bare session-not-found, and the
   /// SEND that followed then looked like the broken step.
+  /// Whether the ACTIVE conversation still has a runtime session the gateway
+  /// knows about.
+  ///
+  /// A stored session key is not liveness. After a WebSocket drop the gateway
+  /// reaps the runtime id, and the transcript can still be on screen from
+  /// history while the id it carries is dead. Anything deciding whether to
+  /// re-attach must ask THIS, not whether the conversation looks open.
+  bool get activeSessionIsLive =>
+      _activeSessionId != null &&
+      _activeSessionId!.isNotEmpty &&
+      _activeSessionId == _verifiedLiveSessionId;
+
   Future<Map<String, dynamic>> _sessionRequest(
       String method, Map<String, dynamic> Function(String sid) build,
       {int timeoutMs = 120000, void Function()? onRecover}) async {

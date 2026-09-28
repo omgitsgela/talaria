@@ -1,0 +1,1 @@
+Fixed: after tapping a conversation notification, replying could fail with "session not found". The conversation is now properly re-attached when it is opened from a notification.

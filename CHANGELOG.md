@@ -3,6 +3,17 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.3.11
+
+### build 50
+- **A notification tap now attaches the conversation properly.** Tapping a notification opened the app to
+  the right conversation, but a reply then failed with "session not found". The routing SKIPPED the resume
+  whenever the tapped conversation was the one already on screen. After a cold start that conversation is
+  on screen from its saved history while its runtime session no longer exists, because the gateway reaps a
+  runtime id when the socket drops. The reply was therefore sent to a dead id. Routing now resumes unless
+  the on-screen session is genuinely LIVE, so a real live turn is still never reset, but a stale one is
+  re-attached. (#30)
+
 ## 1.3.10
 
 ### build 49
