@@ -42,9 +42,9 @@ RepoType: git
 Repo: https://github.com/omgitsgela/talaria
 
 Builds:
-  - versionName: 1.3.7
-    versionCode: 46
-    commit: v1.3.7
+  - versionName: 1.3.10
+    versionCode: 49
+    commit: v1.3.10
     output: build/app/outputs/flutter-apk/app-release.apk
     srclibs:
       # `stable` is the branch their builder clones; the exact SDK version is
