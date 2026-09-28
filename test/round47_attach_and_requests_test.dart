@@ -40,6 +40,15 @@ class FakeGateway extends GatewayClient {
   bool staleRuntime = false;
   String? _freshSid;
 
+  /// The stored key the gateway hands back from session.create, when it gives
+  /// one. A real gateway may omit it, which is why the active_list reconcile
+  /// also adopts it.
+  String? sessionKeyInCreate;
+
+  /// Rows for session.active_list: the runtime id lives in `id` and the stored
+  /// key in `session_key`.
+  List<Map<String, dynamic>> activeListRows = const [];
+
   @override
   GwConnectionState get state => GwConnectionState.open;
   @override
@@ -66,7 +75,13 @@ class FakeGateway extends GatewayClient {
     }
     if (method == 'session.create' || method == 'session.resume') {
       if (staleRuntime) _freshSid = 'sid-fresh';
-      return {'session_id': staleRuntime ? 'sid-fresh' : 'sid-live'};
+      return {
+        'session_id': staleRuntime ? 'sid-fresh' : 'sid-live',
+        if (sessionKeyInCreate != null) 'session_key': sessionKeyInCreate,
+      };
+    }
+    if (method == 'session.active_list') {
+      return {'sessions': activeListRows};
     }
     if (staleRuntime) {
       final sid = params['session_id'];
@@ -350,7 +365,30 @@ void main() {
     expect(store.yoloActive, isFalse);
   });
 
-  // ── 4. A reply after a notification tap must recover a dead runtime ──
+  // ── 4. A created conversation must acquire a STORED id ───────────
+  // Without one, 4001 recovery is skipped and notification payloads are empty,
+  // so a reply from a notification tap fails with "session not found". The
+  // gateway's session.create reply may omit the key, so the authoritative
+  // source is the session.active_list reconcile below.
+
+  test('a created conversation adopts the stored key from active_list',
+      () async {
+    final gw = FakeGateway();
+    final store = fresh(gw);
+    addTearDown(store.dispose);
+    await store.createSession();
+    expect(store.activeStoredSessionId, isNull,
+        reason: 'the gateway gave no key up front');
+    // The roster reconcile is the safety net for a gateway that omits it.
+    gw.activeListRows = const [
+      {'id': 'sid-live', 'session_key': 'stored-from-list', 'status': 'idle'},
+    ];
+    await store.loadSessions();
+    await store.reconcileActiveTurnStatus();
+    expect(store.activeStoredSessionId, 'stored-from-list');
+  });
+
+  // ── 5. A reply after a notification tap must recover a dead runtime ──
 
   test('a reply survives a stale runtime session (the notification-tap case)',
       () async {

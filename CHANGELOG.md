@@ -3,6 +3,33 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.3.12
+
+### build 51
+Fixes from an adversarial read-only code review (gpt-6-astra). Five findings were reported; three are fixed
+here, one is fixed in part, and two remain open on the tracker.
+
+- **A conversation created on the phone now acquires its stored session id.** The stored key was only ever
+  set by re-opening a conversation from history, so a conversation created and used in the app had none:
+  4001 recovery was skipped and notifications carried no navigation payload, which is why a reply sent
+  after a notification tap failed with "session not found". The key is now adopted from the gateway's
+  `session.active_list` reconcile, which is the authoritative source because `session.create` may omit it.
+- **A reply can no longer be submitted into the wrong conversation.** The stale-runtime recovery read the
+  active session id AFTER its await, so if the user switched conversations while a submit was in flight,
+  the recovery re-attached the new conversation and then delivered the earlier conversation's text into it.
+  The send's target is now pinned when it is sent; if the on-screen conversation has changed, the failure is
+  surfaced instead of retargeted. The working indicator and status line are likewise no longer painted onto
+  a conversation the user switched to.
+- **Creating a new conversation no longer inherits the previous one's approval card.** A pending decision
+  survived into the new conversation, and answering it would have paired the old request id with the new
+  session id.
+- **The password prompt's field is keyed to its request.** The card keeps the typed value in its own
+  controller, so without a key a secret typed for one prompt was still in the field when a different prompt
+  replaced it, and Send would have answered the second request with the first secret.
+
+Still open on #31: a queue for concurrent password prompts, and an unconfirmed report that a respond event
+from another conversation clears the current card.
+
 ## 1.3.11
 
 ### build 50

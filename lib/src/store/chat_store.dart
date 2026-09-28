@@ -1242,6 +1242,16 @@ class ChatStore extends ChangeNotifier {
   /// reaps the runtime id, and the transcript can still be on screen from
   /// history while the id it carries is dead. Anything deciding whether to
   /// re-attach must ask THIS, not whether the conversation looks open.
+  /// Whether the conversation on screen is still the one a given send targeted.
+  ///
+  /// The stored key is the stable identity; a runtime id is only meaningful
+  /// while the conversation has never been stored (a draft), where a switch
+  /// necessarily produces a different runtime id. A recovery re-attaching the
+  /// SAME stored conversation therefore still counts as the same target.
+  bool _isSameSendTarget(String? stored, String? sid) =>
+      _activeStoredSessionId == stored &&
+      (stored != null || _activeSessionId == sid);
+
   bool get activeSessionIsLive =>
       _activeSessionId != null &&
       _activeSessionId!.isNotEmpty &&
@@ -2269,6 +2279,12 @@ class ChatStore extends ChangeNotifier {
       if (sid == null || sid.isEmpty) {
         throw GatewayError('session.create returned no session ID');
       }
+      // A decision belonging to the outgoing conversation must not survive
+      // into the new one: answering it later would pair its request id with the
+      // new session id. Cleared here for the same reason resumeSession clears.
+      _pendingRequest = null;
+      _clarifyAnswers.clear();
+      _pendingValueRequest = null;
       // Detach the outgoing session's gateway images BEFORE switching.
       // On success the refs are removed; on failure they are preserved
       // (with a visible error) so no queued image is silently lost.
@@ -2547,6 +2563,16 @@ class ChatStore extends ChangeNotifier {
         final dot = _dotStateForStatus(status);
         if (id.isNotEmpty) states[id] = dot;
         final stored = (row['session_key'] ?? '').toString();
+        // Adopt the stored key for the conversation that is actually live on
+        // this client. A conversation CREATED here otherwise never has one,
+        // which silently disabled 4001 recovery and left every notification
+        // with no navigation payload: the agent's reply then fails with
+        // "session not found" although the transcript is on screen.
+        if (stored.isNotEmpty &&
+            _activeStoredSessionId == null &&
+            (row['id'] ?? '').toString() == _activeSessionId) {
+          _activeStoredSessionId = stored;
+        }
         if (stored.isNotEmpty && stored != id) states[stored] = dot;
         if (id == sid) activeStatus = status;
       }
@@ -2708,6 +2734,16 @@ class ChatStore extends ChangeNotifier {
     final snapshot = List<String>.from(_pendingAttachments);
     Object? failure;
 
+    // Pin the conversation THIS send belongs to. Recovery must never re-read
+    // the active session after an await: if the user switches conversations
+    // while the submit is in flight, recovering against the new one would
+    // execute this text in a conversation it was not written for.
+    // The send's TARGET, not a generation counter: the stale-runtime recovery
+    // is itself a selection transition (it re-attaches this conversation), so a
+    // generation comparison would mistake the store's own recovery for the user
+    // switching away and discard a send that actually succeeded.
+    final sendStored = _activeStoredSessionId;
+    final sendSid = _activeSessionId;
     for (var attempt = 0; attempt < 2; attempt++) {
       try {
         final res = await _client.request('prompt.submit', {
@@ -2733,6 +2769,10 @@ class ChatStore extends ChangeNotifier {
         // session.resume, and a resume resets the turn flags — without this
         // a recovered send would land with no working indicator and no Stop
         // button.)
+        // The turn belongs to the conversation that sent it. Do not paint a
+        // working indicator (or a status line) onto a conversation the user
+        // switched to while this request was in flight.
+        if (!_isSameSendTarget(sendStored, sendSid)) return true;
         _streaming = true;
         final status = (res['status'] ?? '').toString();
         if (status == 'steered') {
@@ -2749,7 +2789,11 @@ class ChatStore extends ChangeNotifier {
         return true;
       } catch (e) {
         failure = e;
-        final stored = _activeStoredSessionId;
+        // A reply that arrives after the user moved to a DIFFERENT conversation
+        // belongs to the earlier one: surface the failure rather than executing
+        // this text somewhere it was not written for.
+        if (!_isSameSendTarget(sendStored, sendSid)) rethrow;
+        final stored = sendStored;
         final staleRuntime = e is GatewayError &&
             e.code == 4001 &&
             attempt == 0 &&

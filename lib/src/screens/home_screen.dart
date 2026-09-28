@@ -2250,6 +2250,11 @@ class _ComposerState extends State<_Composer> {
             if (store.yoloActive) const YoloBanner(),
             if (store.pendingValueRequest != null)
               SecretPromptCard(
+                // Keyed by request: the card holds the typed value in its own
+                // controller, so without this a value typed for one prompt was
+                // still in the field when a DIFFERENT prompt replaced it, and
+                // Send would answer the new request with the old secret.
+                key: ValueKey('value-${store.pendingValueRequest!.id}'),
                 request: store.pendingValueRequest!,
                 onSubmit: store.respondValue,
               ),

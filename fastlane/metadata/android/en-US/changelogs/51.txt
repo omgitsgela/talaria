@@ -1,0 +1,1 @@
+Fixes from an adversarial code review: a conversation created in the app now acquires its stored session id (so replying after a notification tap works), a reply can no longer be submitted into the wrong conversation, a new conversation no longer inherits the previous approval card, and the password prompt field is keyed to its request.
