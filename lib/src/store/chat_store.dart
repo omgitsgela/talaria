@@ -1242,6 +1242,16 @@ class ChatStore extends ChangeNotifier {
   /// reaps the runtime id, and the transcript can still be on screen from
   /// history while the id it carries is dead. Anything deciding whether to
   /// re-attach must ask THIS, not whether the conversation looks open.
+  /// Whether a switch to [id] must drop the transcript currently on screen.
+  ///
+  /// True only when a DIFFERENT conversation's messages are being displayed: a
+  /// stale-runtime recovery resumes the same conversation and must keep them.
+  /// This is what makes the loading state visible during a switch, instead of
+  /// the old conversation sitting there until the new history lands.
+  @visibleForTesting
+  static bool shouldClearTranscriptOnSwitch(String? current, String id) =>
+      current != null && current != id;
+
   /// Whether the conversation on screen is still the one a given send targeted.
   ///
   /// The stored key is the stable identity; a runtime id is only meaningful
@@ -2101,6 +2111,16 @@ class ChatStore extends ChangeNotifier {
     if (_client.state != GwConnectionState.open) return false;
     final generation = ++_selection;
     ++_attachGen;
+    // Switching to a DIFFERENT conversation: drop the transcript on screen NOW
+    // so the loading state is actually visible. Leaving the previous
+    // conversation's messages in place meant the switch showed nothing
+    // happening until the new history arrived, which read as "no loading
+    // screen" and made switching feel slow. Resuming the SAME conversation (a
+    // stale-runtime recovery, for instance) keeps its messages.
+    if (shouldClearTranscriptOnSwitch(_activeStoredSessionId, id)) {
+      _messages.clear();
+      _transcriptEpoch++;
+    }
     _loadingSession = true;
     _pendingRequest = null;
     _statusLine = '';

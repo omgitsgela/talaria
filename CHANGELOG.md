@@ -3,6 +3,26 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.3.13
+
+### build 52
+Three reports, investigated from source.
+
+- **Switching conversations now shows a loading state.** The transcript's loading state is
+  `messages.isEmpty && loading`, so while the PREVIOUS conversation's messages were still on screen
+  nothing indicated a load in progress: the old transcript simply sat there until the new history
+  arrived, which read as no loading screen and slow switching. A switch to a different conversation now
+  drops the transcript immediately so the loading state appears. Re-resuming the SAME conversation (a
+  stale-runtime recovery, for instance) still keeps its messages. (#34)
+- **A model switch can be silently ignored (still open, gateway-side).** The app already reports the
+  gateway's `warning` and `deferred` answers correctly, but the gateway can answer a model switch with
+  success while applying nothing when the session id is unresolved; its fix is in source and needs a
+  gateway restart. It cannot be detected from the app, because `session.info` deliberately displays the
+  picked model even when the live agent kept the old one. (#32)
+- **An attached image leaves no trace in the conversation view (still open).** The user bubble renders
+  text only, and images travel a separate path from file refs, so an image reaches the model with nothing
+  visible in the transcript. (#33)
+
 ## 1.3.12
 
 ### build 51

@@ -1,0 +1,1 @@
+Switching between conversations now shows a loading state immediately instead of leaving the previous conversation on screen until the new one loads. Investigating two further reports: a model switch that the gateway can silently ignore, and attached images leaving no trace in the conversation view.
