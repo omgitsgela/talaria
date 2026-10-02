@@ -418,8 +418,13 @@ void main() {
 
   // ── 5. An approval belongs to ONE conversation ───────────────────
 
-  test('an approval for another conversation does not appear in this one',
+  test('an approval ALWAYS appears, even from another conversation',
       () async {
+    // Deliberately the opposite of what an earlier version asserted. Scoping the
+    // card by session id silently hid prompts: the request's session id is not
+    // guaranteed to share an id space with ours, and a hidden prompt leaves the
+    // agent blocked or withdrawn. Showing it in the wrong place is the lesser
+    // harm.
     final gw = FakeGateway();
     final store = fresh(gw);
     addTearDown(store.dispose);
@@ -436,8 +441,9 @@ void main() {
       },
     })!);
     await Future<void>.delayed(Duration.zero);
-    expect(store.pendingRequest, isNull,
-        reason: "another conversation's approval must not be shown in this one");
+    expect(store.pendingRequest, isNotNull,
+        reason: 'a prompt the user cannot see is worse than one shown in the '
+            'wrong conversation: the agent stays blocked or is withdrawn');
 
     // Belongs to THIS session: the card appears, as before.
     gw.pushRequest(serverRequestFromFrame(const <String, dynamic>{

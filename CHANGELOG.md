@@ -3,6 +3,25 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.3.14
+
+### build 53
+- **Approval, sudo and password prompts now actually appear.** The app never told the gateway it can answer
+  server-to-client requests. The gateway's contract says it outright: a client that never sends
+  `client.capabilities` with `server_requests: true` gets every such request "failed fast instead of
+  stalling the agent". Its log shows the consequence in the user's own words, repeatedly: "Command approval
+  was withdrawn before the user answered (the attached client cannot answer approval requests (update the
+  Hermes app))". The desktop showed the prompt because it advertises the capability. The app now advertises
+  it on every connection, so a reconnect re-advertises too. (#35)
+- **A prompt is never suppressed.** An earlier change scoped the approval card to the active conversation by
+  session id, which could also hide a prompt that DID arrive, since the request's session id is not
+  guaranteed to share an id space with the client's own. The card is now always shown: a prompt the user
+  cannot see leaves the agent blocked or withdrawn, a far worse outcome than a decision shown beside the
+  wrong conversation.
+- `/yolo` reports the gateway's own computed state (which ORs the per-session flag, `--yolo`, and
+  `approvals.mode: off`), so it is not tracked locally. If `/yolo` itself does not take effect, that is the
+  gateway-side class in #32 and needs the pending gateway restart.
+
 ## 1.3.13
 
 ### build 52

@@ -498,6 +498,15 @@ class GatewayClient {
       final ev = GatewayEvent.fromParams(frameRaw['params'] as Map<String, dynamic>);
       if (ev.type == 'gateway.ready') {
         final payload = ev.payload;
+        // Tell the gateway this client ANSWERS server->client requests. Without
+        // it the gateway fails every approval / sudo / secret request fast:
+        // `client.capabilities` in tui_gateway/methods_voice.py states that "a
+        // WebSocket client that never sends it gets every such request failed
+        // fast instead of stalling the agent". That is why no approval prompt
+        // ever appeared in the app while the desktop showed one. The
+        // advertisement is per CONNECTION, so it is re-sent on every ready,
+        // which covers reconnects.
+        unawaited(_advertiseCapabilities());
         // Start the liveness ping UNCONDITIONALLY. The gateway implements
         // `gateway.ping` (tui_gateway/ws.py), but it does not advertise
         // `heartbeat: true`, so gating on that flag meant the timer never ran
@@ -656,6 +665,18 @@ class GatewayClient {
         }
       }
       rethrow;
+    }
+  }
+
+  /// Tell the gateway this client can answer server->client requests.
+  ///
+  /// Best-effort on purpose: a gateway older than this method answers an error,
+  /// which is not worth surfacing, and the connection is unaffected either way.
+  Future<void> _advertiseCapabilities() async {
+    try {
+      await request('client.capabilities', {'server_requests': true});
+    } catch (_) {
+      // Older gateway, or a transient failure: nothing to do.
     }
   }
 

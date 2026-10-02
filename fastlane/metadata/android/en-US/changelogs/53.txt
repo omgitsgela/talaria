@@ -1,0 +1,1 @@
+Approval, sudo and password prompts now appear in the app. The app was not telling the gateway it could answer those requests, so the gateway failed each one immediately and reported that the attached client could not answer approvals. It now advertises that it can.

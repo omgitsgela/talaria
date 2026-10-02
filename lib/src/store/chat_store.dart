@@ -1359,26 +1359,27 @@ class ChatStore extends ChangeNotifier {
         // to be open would put a decision in front of the user for a
         // conversation they are not looking at. Anything else arrives as a
         // notification instead.
-        final mine = req.sessionId == null || req.sessionId == _activeSessionId;
-        if (mine) {
-          _pendingRequest = GatewayEvent(
-            type: 'approval.request',
-            sessionId: req.sessionId,
-            payload: req.params,
-          );
-          _statusLine = 'Waiting for your input…';
-        }
+        // ALWAYS show the card. Suppressing a prompt the user cannot see leaves
+        // the agent blocked, or withdrawn entirely ("the attached client cannot
+        // answer approval requests"), and the request's session id is not
+        // guaranteed to be in the same id space as ours. Showing one decision
+        // beside the wrong conversation is a far smaller harm than a prompt
+        // that never appears. (An earlier version scoped this by session id;
+        // it is what silently hid these prompts.)
+        _pendingRequest = GatewayEvent(
+          type: 'approval.request',
+          sessionId: req.sessionId,
+          payload: req.params,
+        );
+        _statusLine = 'Waiting for your input…';
         final command = (req.params['command'] ?? '').toString();
         _pushNotification(
           title: 'Hermes needs approval',
-          body: mine
-              ? (command.isEmpty ? 'A command is waiting for your decision.'
-                                 : command)
-              : 'A command is waiting for your decision in another conversation.',
+          body: command.isEmpty
+              ? 'A command is waiting for your decision.'
+              : command,
           tag: 'approval-${req.requestId}',
-          // Only a request for the ACTIVE session can be routed to a stored id;
-          // for another conversation we send no payload rather than a wrong one.
-          sessionId: mine ? _activeStoredSessionId : '',
+          sessionId: _activeStoredSessionId,
         );
         _notify();
         return;
