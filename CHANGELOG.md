@@ -3,6 +3,34 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.3.15
+
+### build 54
+Fixes four defects found by an independent review of the previous round, each verified against the source
+before it was changed:
+
+- **A fresh chat was exempt from the switch fix.** The guard treated "no stored id on screen" as "nothing
+  to drop", so opening a listed conversation from a fresh chat skipped the whole fix: the old transcript and
+  goal bar stayed up and the loading card showed a placeholder instead of the target's name. A fresh chat
+  can hold messages and a `/goal`, so it now counts as a different conversation. The test that pinned the
+  old behaviour was inverted, with the reasoning recorded in it. (#36, #37)
+- **Answering an approval used the on-screen conversation's id, not the request's.** The card is never
+  suppressed, so it can belong to a conversation you are not viewing, and the gateway resolves a
+  `request_id` only inside that session's own queue. Replying with the active session's id found nothing,
+  returned a success with `resolved: 0`, and left the agent parked until it was withdrawn, while the card
+  had already disappeared optimistically. The reply now carries the request's own session. (#35)
+- **The capability advertisement could be lost for a whole connection.** A fast `gateway.ready` can be
+  processed before the connection state flips to open, in which case the request threw and the bare catch
+  swallowed it with no retry, permanently disabling approvals on that connection. The advertisement is now
+  also sent when the connection becomes open, and it is idempotent.
+- **Switching wiped an approval card that belonged to another conversation**, leaving that request
+  unanswered until withdrawal. The clear on the switch path is gone; the incoming conversation's own card is
+  re-armed from the resume reply.
+
+Known outstanding from the same review, not yet fixed: an early stored-id assignment is not restored when a
+switch FAILS (the store can then claim one conversation while attached to another), and the goal refresh
+coalesces and staleness-guards across sessions.
+
 ## 1.3.14
 
 ### build 53

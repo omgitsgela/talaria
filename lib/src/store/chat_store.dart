@@ -1250,7 +1250,7 @@ class ChatStore extends ChangeNotifier {
   /// the old conversation sitting there until the new history lands.
   @visibleForTesting
   static bool shouldClearTranscriptOnSwitch(String? current, String id) =>
-      current != null && current != id;
+      current != id;
 
   /// Whether the conversation on screen is still the one a given send targeted.
   ///
@@ -2134,7 +2134,10 @@ class ChatStore extends ChangeNotifier {
       _activeStoredSessionId = id;
     }
     _loadingSession = true;
-    _pendingRequest = null;
+    // A card belonging to ANOTHER conversation survives a switch: the card is
+    // deliberately never suppressed, and wiping it leaves that request
+    // unanswered until it is withdrawn. The incoming conversation's own card is
+    // re-armed from the resume reply.
     _statusLine = '';
     var established = false;
     if (!silent) notifyListeners();
@@ -2262,7 +2265,6 @@ class ChatStore extends ChangeNotifier {
     // (pending_clarify / pending_approval) — a session parked on a clarify
     // or approval would otherwise look idle here while its agent waits until
     // timeout, and there would be no card to answer it from.
-    _pendingRequest = null;
     final pendingClarify = res['pending_clarify'];
     final pendingApproval = res['pending_approval'];
     final sid = _activeSessionId ?? '';
@@ -3630,7 +3632,16 @@ class ChatStore extends ChangeNotifier {
     }
     final isBatchQuestion = questionId != null && questionId.isNotEmpty;
     final params = <String, dynamic>{
-      'session_id': _activeSessionId,
+      // The REQUEST's session, not the on-screen one. The card is deliberately
+      // never suppressed, so it can belong to a conversation the user is not
+      // viewing; the gateway resolves a request_id only within that session's own
+      // queue, so replying with the active session's id finds nothing and returns
+      // a success with resolved: 0. The user believes they approved while the
+      // agent stays parked until it times out and is withdrawn (#35's symptom).
+      'session_id': (_pendingRequest?.payload['request_id'] == requestId
+              ? _pendingRequest?.sessionId
+              : null) ??
+          _activeSessionId,
       'request_id': requestId,
     };
     Future<Map<String, dynamic>> Function() send;

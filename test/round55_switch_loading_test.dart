@@ -18,8 +18,14 @@ void main() {
           isFalse);
     });
 
-    test('the first open has nothing to drop', () {
-      expect(ChatStore.shouldClearTranscriptOnSwitch(null, 'stored-a'), isFalse);
+    test('a fresh chat counts as a different conversation', () {
+      // Deliberately the opposite of what this asserted before. A null current
+      // id does NOT mean there is nothing to drop: it means the on-screen
+      // conversation has no stored id yet (the app's default after connect). A
+      // fresh chat can hold messages and a /goal, and opening a listed
+      // conversation from it must still clear both. The old null guard skipped
+      // the entire switch fix on exactly that path.
+      expect(ChatStore.shouldClearTranscriptOnSwitch(null, 'stored-a'), isTrue);
     });
   });
 }

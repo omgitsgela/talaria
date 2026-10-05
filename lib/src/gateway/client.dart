@@ -319,6 +319,11 @@ class GatewayClient {
         throw GatewayError('connection cancelled during handshake');
       }
       _setState(GwConnectionState.open);
+      // Advertise HERE as well as on gateway.ready: a fast ready frame can be
+      // processed before this state flips, in which case the request throws
+      // 'gateway not connected' and the only trigger had already fired, leaving
+      // the connection permanently unable to answer approvals. Idempotent.
+      unawaited(_advertiseCapabilities());
       _lastInbound = DateTime.now();
       _reconnectAttempt = 0;
       unawaited(_fetchReplay(gen));
