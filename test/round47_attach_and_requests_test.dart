@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:talaria/src/gateway/client.dart';
 import 'package:talaria/src/gateway/config.dart';
+import 'package:talaria/src/models/goal_status.dart';
 import 'package:talaria/src/store/chat_store.dart';
 
 /// Round 47: two reported defects that turned out to be the same class of
@@ -417,6 +418,37 @@ void main() {
   });
 
   // ── 5. An approval belongs to ONE conversation ───────────────────
+
+  test('switching drops the previous conversation goal at once', () async {
+    final gw = FakeGateway();
+    final store = fresh(gw);
+    addTearDown(store.dispose);
+    await store.resumeSession('stored-1', silent: true);
+
+    // A /goal persists across many turns, so it is real state on screen.
+    store.setGoalForTest(GoalStatus(
+        status: 'active',
+        title: 'deploy the thing',
+        updatedAt: DateTime(2026, 10, 2),
+      ));
+    expect(store.activeGoal, isNotNull);
+
+    // Switching to a DIFFERENT conversation. Deliberately not awaited: the
+    // defect was about what is on screen WHILE the new conversation loads, so
+    // the assertion has to be read before the transcript lands.
+    final f = store.resumeSession('stored-2', silent: true);
+    expect(store.activeGoal, isNull,
+        reason: 'the goal bar belongs to the conversation being left, so it '
+            'must not sit over a different conversation while it loads');
+    expect(store.activeStoredSessionId, 'stored-2',
+        reason: 'the loading card resolves its title from the stored id; a '
+            'stale one announces the PREVIOUS conversation for the whole load');
+    try {
+      await f;
+    } catch (_) {
+      // The switch's own RPCs are not what this test is about.
+    }
+  });
 
   test('an approval ALWAYS appears, even from another conversation',
       () async {

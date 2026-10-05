@@ -2121,6 +2121,17 @@ class ChatStore extends ChangeNotifier {
     if (shouldClearTranscriptOnSwitch(_activeStoredSessionId, id)) {
       _messages.clear();
       _transcriptEpoch++;
+      // The goal bar belongs to the conversation being LEFT. A /goal persists
+      // across many turns, so leaving it up while a DIFFERENT conversation loads
+      // showed the previous conversation's goal over the new one. The new
+      // conversation's own goal is read when its transcript lands.
+      _activeGoal = null;
+      // Name the conversation being opened NOW, not the one being left. The
+      // loading card resolves its title from the stored id, which was only
+      // assigned after the resume reply arrived, so it announced the PREVIOUS
+      // conversation for the whole load. An id the roster does not know yet
+      // simply falls back to the card's own placeholder, which is correct.
+      _activeStoredSessionId = id;
     }
     _loadingSession = true;
     _pendingRequest = null;
