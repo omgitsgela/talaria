@@ -114,9 +114,13 @@ class ChatMessage {
     String? error,
     this.time,
     List<MessagePart>? parts,
+    List<String> attachments = const <String>[],
   })  : _id = _nextChatMessageId++,
         _pending = pending,
         _error = error,
+        // Always own a MUTABLE copy: hydrators pass const/frozen lists, and
+        // the history reconciler later mutates refs via setAttachments.
+        _attachments = List<String>.from(attachments),
         _parts = parts != null ? List<MessagePart>.from(parts) : <MessagePart>[] {
     // Hydration / legacy construction: seed an ordered part list from the
     // bucket fields in canonical order (thinking precedes action precedes
@@ -138,6 +142,127 @@ class ChatMessage {
 
   final String role; // user | assistant
   final List<MessagePart> _parts;
+
+  /// Attachment refs carried BY the message itself: `@image:<staged path>`
+  /// and `@file:<ref>` tokens. The bubble renders these as a thumbnail or a
+  /// file chip, so a sent attachment always leaves a visible trace in the
+  /// transcript instead of hiding inside the text (issue #33). They arrive
+  /// two ways: the store sets them on its own optimistic row, and the
+  /// hydrators parse them out of the gateway's persisted text (the gateway
+  /// persists a user's images as trailing `@image:` lines,
+  /// `tui_gateway/session_history.py` `_build_persist_message_with_image_refs`).
+  final List<String> _attachments;
+  List<String> get attachments => List.unmodifiable(_attachments);
+
+  /// Replace the message's attachment refs (bumps revision so the row
+  /// repaints). Used by the history reconciler when a durable read carries
+  /// fresher refs than the retained row - without this, a merge that keeps
+  /// the message object would silently drop the new attachment (#33 fix,
+  /// round-56 review finding 1).
+  void setAttachments(List<String> refs) {
+    if (_attachments.length == refs.length) {
+      var same = true;
+      for (var i = 0; i < refs.length; i++) {
+        if (_attachments[i] != refs[i]) {
+          same = false;
+          break;
+        }
+      }
+      if (same) return;
+    }
+    _attachments
+      ..clear()
+      ..addAll(refs);
+    _bumpRevision(content: true);
+  }
+
+  /// The gateway's ref token grammar: `@image:`/`@file:` plus a bare path or
+  /// a quoted value (`format_reference_value` quotes values containing
+  /// spaces). Mirrors the gateway's own `_IMAGE_REF_RE`.
+  static const _refGrammar =
+      r'''@(?:file|image):(?:`[^`]*`|"[^"]*"|'[^']*'|\S+)''';
+  static final RegExp _wholeRefLine = RegExp('^$_refGrammar\$');
+
+  /// Number of markdown fence markers (``` or ~~~) in [lines]. An ODD count
+  /// means the text's tail is inside an unclosed code block, where a
+  /// `@file:`/`@image:` look-alike is literal code, not an attachment.
+  static int _fenceCount(List<String> lines) {
+    var count = 0;
+    for (final line in lines) {
+      final t = line.trimLeft();
+      if (t.startsWith('```') || t.startsWith('~~~')) count++;
+    }
+    return count;
+  }
+
+  /// Split a hydrated message's text into the display text and the attachment
+  /// refs it carries. Trailing ref lines (the gateway's persisted image form)
+  /// and leading ref tokens (the store's own `@file:` prepend form) are both
+  /// recognized and removed from the display text, so the token never renders
+  /// as raw text in a bubble. Mirrors the desktop's `extractImageRefs` and the
+  /// gateway's own projection stripping.
+  static ({String text, List<String> refs}) extractAttachmentRefs(
+      String content) {
+    final refs = <String>[];
+    final lines = content.split('\n');
+    // Trailing ref lines: the gateway's persisted image form (caption first,
+    // `@image:` directives last). Mirrors `_IMAGE_REF_RE` full-match-per-line,
+    // which anchors the token at the LINE START: a ref the gateway persisted
+    // is never indented. An indented look-alike (`    @file:notes.txt` inside
+    // a code sample) is literal text the user wrote, and the gateway's own
+    // projection never strips it - so the app must not either (round-56
+    // review finding 6).
+    //
+    // Open fences: with an ODD number of fence markers the trailing region
+    // sits inside an unclosed code block, and every trailing line there is
+    // literal code. Closed fences pair up (even), so ordinary fenced samples
+    // keep their extraction - the gateway appends real refs AFTER the text.
+    while (lines.isNotEmpty &&
+        _wholeRefLine.hasMatch(lines.last) &&
+        _fenceCount(lines) % 2 == 0) {
+      refs.insert(0, lines.removeLast());
+    }
+    while (lines.isNotEmpty && lines.last.trim().isEmpty) {
+      lines.removeLast();
+    }
+    // Leading ref tokens: the store's own `@file:` prepend form. A token must
+    // end at whitespace or end-of-line, so a name that merely starts like a
+    // token is not mistaken for one.
+    while (lines.isNotEmpty) {
+      final first = lines.first;
+      final m = RegExp(
+              r'''^(@(?:file|image):(?:`[^`]*`|"[^"]*"|'[^']*'|\S+))(?=\s|$)''')
+          .firstMatch(first);
+      if (m == null) break;
+      refs.add(m.group(1)!);
+      final rest = first.substring(m.end);
+      if (rest.trim().isEmpty) {
+        lines.removeAt(0);
+      } else {
+        lines[0] = rest.trimLeft();
+      }
+    }
+    while (lines.isNotEmpty && lines.first.trim().isEmpty) {
+      lines.removeAt(0);
+    }
+    return (text: lines.join('\n'), refs: refs);
+  }
+
+  /// Strip the ref token's quoting (the gateway quotes values containing
+  /// spaces with backticks or quotes).
+  static String unwrapAttachmentRef(String ref) {
+    final value = ref.startsWith('@image:')
+        ? ref.substring(7)
+        : ref.startsWith('@file:')
+            ? ref.substring(6)
+            : ref;
+    if (value.length >= 2) {
+      for (final q in ['`', '"', "'"]) {
+        if (value.startsWith(q) && value.endsWith(q)) return value.substring(1, value.length - 1);
+      }
+    }
+    return value;
+  }
 
   /// Monotonic identity for "this message's CONTENT changed" (row
   /// memoization) and "this message changed at all" (widget equality).
@@ -317,7 +442,20 @@ class ChatMessage {
   /// per-message contract the round 8 tests pin.
   String _effectiveReasoning = '';
   String get effectiveReasoning => _effectiveReasoning;
-  set effectiveReasoning(String v) => _effectiveReasoning = v;
+
+  /// Setting the DISPLAY view bumps [revision] whenever the value actually
+  /// changed. The bubble's build memo is gated on [revision], and hiding or
+  /// showing traces changes ONLY this display view (issue #8): without the
+  /// bump, flipping the setting repainted nothing until some unrelated
+  /// content change happened to land. Conditional on an actual change so
+  /// rows whose value was already correct do not rebuild — the memoization
+  /// win survives the toggle.
+  set effectiveReasoning(String v) {
+    if (_effectiveReasoning != v) {
+      _effectiveReasoning = v;
+      _bumpRevision();
+    }
+  }
 
   /// Local authoring time of this message (from the gateway's `timestamp`,
   /// Unix seconds, or `DateTime.now()` for optimistic local appends). Drives
@@ -353,6 +491,7 @@ class ChatMessage {
         id: _id,
         role: role,
         parts: _parts,
+        attachments: _attachments,
         effectiveReasoning: _effectiveReasoning,
         time: time,
         pending: _pending,
@@ -365,6 +504,7 @@ class ChatMessage {
     required int id,
     required String role,
     required List<MessagePart> parts,
+    required List<String> attachments,
     required String effectiveReasoning,
     required DateTime? time,
     required bool pending,
@@ -374,6 +514,7 @@ class ChatMessage {
   })  : _id = id,
         role = role,
         _parts = parts,
+        _attachments = attachments,
         _effectiveReasoning = effectiveReasoning,
         time = time,
         _pending = pending,

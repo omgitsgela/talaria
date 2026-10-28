@@ -1334,11 +1334,43 @@ class ChatStore extends ChangeNotifier {
   // answered. The app had no channel for them at all, so no approval dialog or
   // sudo prompt could ever appear and the turn sat until the gateway's own
   // timeout.
-  ServerRequest? _pendingValueRequest;
+  //
+  // VALUE prompts (sudo/secret/vault) QUEUE (issue #31 remainder). There is
+  // one card on screen, so the head of the queue is what it shows; a second
+  // prompt used to REPLACE the first unconditionally, and the replaced request
+  // was never answered - its agent waited out the gateway timeout while the
+  // user believed they had a card. Queue order is arrival order.
+  final List<ServerRequest> _pendingValueRequests = [];
   StreamSubscription<ServerRequest>? _requestSub;
 
-  /// The sudo/secret prompt waiting on the user, if any.
-  ServerRequest? get pendingValueRequest => _pendingValueRequest;
+  /// True when this request id is already shown or queued. Guards against a
+  /// duplicate re-arm: resume's `open_requests` and a reconnect's
+  /// `session.events.since` replay can both deliver the same open request,
+  /// and a duplicate card could never be answered (only the real request is
+  /// on the gateway).
+  bool _requestKnown(Object id) {
+    final s = id.toString();
+    if (_pendingCardRequestId == s) return true;
+    for (final r in _pendingValueRequests) {
+      if (r.id.toString() == s) return true;
+    }
+    return false;
+  }
+
+  /// The sudo/secret prompt waiting on the user, if any (queue head).
+  ServerRequest? get pendingValueRequest =>
+      _pendingValueRequests.isEmpty ? null : _pendingValueRequests.first;
+
+  /// The whole unanswered value-prompt queue. The card shows the head; the
+  /// UI counts the rest so a queued prompt is never invisible.
+  List<ServerRequest> get pendingValueRequests =>
+      List.unmodifiable(_pendingValueRequests);
+
+  /// The server-request id of the approval/clarify card (the gateway's
+  /// `srq-...` id, distinct from the card payload's `request_id`). The
+  /// withdrawal event `request.cancel` names THIS id, so a cancel for another
+  /// request cannot tear this card down.
+  String? _pendingCardRequestId;
 
   /// The session's EFFECTIVE approval bypass, straight from the gateway.
   ///
@@ -1352,6 +1384,7 @@ class ChatStore extends ChangeNotifier {
   bool get yoloActive => _yoloActive;
 
   void _onServerRequest(ServerRequest req) {
+    if (_requestKnown(req.id)) return;
     switch (req.method) {
       case 'approval': {
         // An approval belongs to ONE conversation. The card is scoped to it:
@@ -1371,6 +1404,7 @@ class ChatStore extends ChangeNotifier {
           sessionId: req.sessionId,
           payload: req.params,
         );
+        _pendingCardRequestId = req.id.toString();
         _statusLine = 'Waiting for your input…';
         final command = (req.params['command'] ?? '').toString();
         _pushNotification(
@@ -1389,7 +1423,7 @@ class ChatStore extends ChangeNotifier {
       case 'vault.unlock_prompt':
       case 'vault.save_login':
       case 'vault.code':
-        _pendingValueRequest = req;
+        _pendingValueRequests.add(req);
         // A password prompt the user never sees would hang the turn silently,
         // so it always raises a notification as well as the in-composer card.
         _pushNotification(
@@ -1408,6 +1442,7 @@ class ChatStore extends ChangeNotifier {
         // resolution withdraws this request. Re-shape it into the event the
         // existing UI consumes so a live clarify now shows up too.
         if (req.sessionId == null || req.sessionId == _activeSessionId) {
+          _pendingCardRequestId = req.id.toString();
           _onEvent(GatewayEvent(
             type: 'clarify.request',
             sessionId: req.sessionId,
@@ -1426,13 +1461,52 @@ class ChatStore extends ChangeNotifier {
   }
 
   /// Answer a sudo or secret prompt. The value goes straight back to the
-  /// gateway's waiting callback and is never stored or shown again.
-  void respondValue(String value) {
-    final req = _pendingValueRequest;
-    if (req == null) return;
-    _pendingValueRequest = null;
+  /// gateway's waiting callback and is never stored or shown again. Queued:
+  /// answering the head surfaces the next prompt in arrival order.
+  ///
+  /// [requestId] is the id the CARD was built for. A card's callback can be
+  /// invoked after its queue entry was withdrawn (cancel lands between the
+  /// user pressing Send and the widget rebuilding), and blindly dequeuing the
+  /// head would then send this card's secret to the NEXT request (round-56
+  /// review finding 2). A submission naming a request the store no longer
+  /// holds is stale and is dropped.
+  void respondValue(String value, {required String requestId}) {
+    final idx = _pendingValueRequests.indexWhere(
+        (r) => r.id.toString() == requestId);
+    if (idx < 0) return; // Stale card (cancelled/expired/answered elsewhere).
+    final req = _pendingValueRequests.removeAt(idx);
     _client.respondToServerRequest(req.id, {'value': value});
     _notify();
+  }
+
+  /// Withdraw the card the gateway named. `request.cancel` is the gateway's
+  /// ONLY withdrawal event for server requests: a deadline, an interrupt, or
+  /// a resolution from another surface (desktop, /approve on Telegram) fires
+  /// `_emit_cancel` (tui_gateway/server_requests.py) with the request's id.
+  /// (Verified: `approval.respond`/`clarify.respond` are RPCs the CLIENT sends,
+  /// never events the gateway emits - the old event branches here were dead
+  /// code, and ignoring the real event left cards on screen after their agent
+  /// had already moved on, or parked forever on a request that no longer
+  /// exists.)
+  void _onRequestCancel(String canceledId) {
+    if (canceledId.isEmpty) return;
+    var changed = false;
+    for (var i = 0; i < _pendingValueRequests.length; i++) {
+      if (_pendingValueRequests[i].id.toString() == canceledId) {
+        _pendingValueRequests.removeAt(i);
+        changed = true;
+        break;
+      }
+    }
+    if (_pendingRequest != null &&
+        _pendingCardRequestId != null &&
+        _pendingCardRequestId == canceledId) {
+      _pendingRequest = null;
+      _pendingCardRequestId = null;
+      _clarifyAnswers.clear();
+      changed = true;
+    }
+    if (changed && !_disposed) notifyListeners();
   }
 
   void _onEvent(GatewayEvent ev) {
@@ -1638,17 +1712,23 @@ class ChatStore extends ChangeNotifier {
           if (expiring.isNotEmpty && current.isNotEmpty) {
             if (expiring == current) {
               _pendingRequest = null;
+              _pendingCardRequestId = null;
               _clarifyAnswers.clear();
             }
           } else if (sameSid) {
             _pendingRequest = null;
+            _pendingCardRequestId = null;
             _clarifyAnswers.clear();
           }
         }
         break;
-      case 'approval.respond':
-      case 'clarify.respond':
-        _pendingRequest = null;
+      case 'request.cancel':
+        // The gateway's ONLY withdrawal event for a server request (verified
+        // in tui_gateway/server_requests.py `_emit_cancel`: a timeout, an
+        // interrupt, or a resolution from another surface). Matched by the
+        // server-request id, never blindly: a cancel naming another request
+        // must leave this card alone.
+        _onRequestCancel((ev.payload['id'] ?? '').toString());
         break;
       case 'session.info':
       case 'session.usage':
@@ -1847,21 +1927,36 @@ class ChatStore extends ChangeNotifier {
         if (m is! Map) continue;
         final role = (m['role'] ?? '') as String;
         if (role != 'user' && role != 'assistant') continue;
-        final content = m['text']?.toString() ?? '';
+        var content = m['text']?.toString() ?? '';
         // A reasoning-only assistant row (kept by the gateway so "Thinking…"
         // survives a reload) has no text but must not be dropped.
         final reasoning = role == 'assistant'
             ? (m['reasoning'] ?? m['reasoning_content'])?.toString() ?? ''
             : '';
+        // User rows carry their attachments as `@image:`/`@file:` tokens in
+        // the persisted text (#33): carry them onto the message as data and
+        // keep the tokens out of the display text.
+        var refs = const <String>[];
+        if (role == 'user') {
+          final extracted = ChatMessage.extractAttachmentRefs(content);
+          content = extracted.text;
+          refs = extracted.refs;
+        }
         // Authoring time (Unix seconds) — drives the transcript's time-category
         // section breaks. Accept the gateway's `timestamp` or a `ts` alias.
         final tsRaw = m['timestamp'] ?? m['ts'];
         final time = tsRaw is num && tsRaw > 0
             ? DateTime.fromMillisecondsSinceEpoch((tsRaw * 1000).round())
             : null;
-        if (content.isEmpty && reasoning.isEmpty) continue;
+        // A caption-less image row persists as ONLY ref lines; it would look
+        // empty after extraction but dropping it would erase the attachment.
+        if (content.isEmpty && reasoning.isEmpty && refs.isEmpty) continue;
         final msg = ChatMessage(
-            role: role, text: content, reasoning: reasoning, time: time);
+            role: role,
+            text: content,
+            reasoning: reasoning,
+            time: time,
+            attachments: refs);
         // Respect the trace VISIBILITY gate on rehydrate: the raw trace
         // stays in reasoning (re-show restores it), but a hydrated row must
         // not resurrect a hidden trace (effectiveReasoning defaults to the
@@ -1905,6 +2000,11 @@ class ChatStore extends ChangeNotifier {
       if (sameRoles) {
         for (var i = 0; i < fresh.length; i++) {
           _messages[i].setTextParts([fresh[i].text]);
+          // The durable read is the authority on attachments: a retained row
+          // whose refs changed (an image ref the hydrator newly extracted, or
+          // one history dropped) must carry the fresh refs, or the bubble
+          // keeps rendering a stale/no-attachment row (#33, review finding 1).
+          _messages[i].setAttachments(fresh[i].attachments);
         }
         return;
       }
@@ -1914,7 +2014,8 @@ class ChatStore extends ChangeNotifier {
     while (prefix < fresh.length &&
         prefix < _messages.length &&
         fresh[prefix].role == _messages[prefix].role &&
-        fresh[prefix].text == _messages[prefix].text) {
+        fresh[prefix].text == _messages[prefix].text &&
+        _sameRefs(fresh[prefix].attachments, _messages[prefix].attachments)) {
       prefix++;
     }
     _messages.removeRange(prefix, _messages.length);
@@ -1927,7 +2028,19 @@ class ChatStore extends ChangeNotifier {
   static bool _sameTranscript(List<ChatMessage> a, List<ChatMessage> b) {
     if (a.length != b.length) return false;
     for (var i = 0; i < a.length; i++) {
-      if (a[i].role != b[i].role || a[i].text != b[i].text) return false;
+      if (a[i].role != b[i].role ||
+          a[i].text != b[i].text ||
+          !_sameRefs(a[i].attachments, b[i].attachments)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  static bool _sameRefs(List<String> a, List<String> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
     }
     return true;
   }
@@ -2171,8 +2284,59 @@ class ChatStore extends ChangeNotifier {
       // the conversation switches — answering it from the new session would
       // send the reply to the wrong session_id.
       _pendingRequest = null;
+      _pendingCardRequestId = null;
       _hydrateFromResume(res);
+      // The gateway replays requests still open on THIS session
+      // (`open_requests`, server.py `_resume_response` +
+      // `session.events.since`): the agent is parked until each is answered,
+      // and a client that detached when the frame was written would otherwise
+      // never see it again. Re-arm them here so they are answerable.
+      final openReqs = res['open_requests'];
+      if (openReqs is List) {
+        for (final entry in openReqs) {
+          if (entry is! Map) continue;
+          final req = ServerRequest(
+            id: entry['id'] ?? '',
+            method: (entry['method'] ?? '').toString(),
+            params: entry['params'] is Map<String, dynamic>
+                ? Map<String, dynamic>.from(entry['params'] as Map)
+                : const {},
+            sessionId: (entry['params'] is Map &&
+                    (entry['params'] as Map)['session_id'] is String)
+                ? (entry['params'] as Map)['session_id'] as String
+                : _activeSessionId,
+          );
+          if (req.method.isEmpty) continue;
+          _onServerRequest(req);
+        }
+      }
+      // Reconcile, not just append (round-56 review finding 5): a locally
+      // displayed prompt that ANOTHER surface answered during a disconnect
+      // is gone from the gateway's authoritative snapshot - and the gateway
+      // does NOT emit request.cancel for a successful value answer
+      // (server_requests.resolve_response settles silently). Any local entry
+      // for THIS session whose transport id is missing from the fresh
+      // snapshot is therefore retired here. Legacy event-only cards (never
+      // carried a transport id) are left alone: their retirement channel is
+      // the legacy expire event.
       established = true;
+      {
+        final freshIds = <String>{
+          for (final entry in (openReqs is List ? openReqs : const <Object>[]))
+            if (entry is Map) entry['id'].toString(),
+        };
+        _pendingValueRequests.removeWhere((r) =>
+            (r.sessionId == null || r.sessionId == _activeSessionId) &&
+            !freshIds.contains(r.id.toString()));
+        if (_pendingCardRequestId != null &&
+            (_pendingRequest?.sessionId == null ||
+                _pendingRequest?.sessionId == _activeSessionId) &&
+            !freshIds.contains(_pendingCardRequestId!)) {
+          _pendingRequest = null;
+          _pendingCardRequestId = null;
+          _clarifyAnswers.clear();
+        }
+      }
     } catch (e) {
       if (_disposed || generation != _selection) return false;
       // A failed resume must not discard the pending attachments —
@@ -2208,17 +2372,34 @@ class ChatStore extends ChangeNotifier {
         if (m is! Map) continue;
         final role = (m['role'] ?? '') as String;
         if (role != 'user' && role != 'assistant') continue;
-        final content = (m['text']?.toString() ?? '');
+        var content = (m['text']?.toString() ?? '');
         final reasoning = role == 'assistant'
             ? (m['reasoning'] ?? m['reasoning_content'])?.toString() ?? ''
             : '';
+        // User rows carry their attachments as `@image:`/`@file:` tokens in
+        // the persisted text (#33): take them onto the message as data so the
+        // bubble can render a thumbnail/chip, and keep the tokens out of the
+        // display text.
+        var refs = const <String>[];
+        if (role == 'user') {
+          final extracted = ChatMessage.extractAttachmentRefs(content);
+          content = extracted.text;
+          refs = extracted.refs;
+        }
         final tsRaw = m['timestamp'] ?? m['ts'];
         final time = tsRaw is num && tsRaw > 0
             ? DateTime.fromMillisecondsSinceEpoch((tsRaw * 1000).round())
             : null;
-        if (content.isEmpty && reasoning.isEmpty) continue;
+        // An image with no caption persists as ONLY ref lines - once the refs
+        // are extracted the row would look empty, but dropping it would erase
+        // the attachment from the transcript entirely.
+        if (content.isEmpty && reasoning.isEmpty && refs.isEmpty) continue;
         final msg = ChatMessage(
-            role: role, text: content, reasoning: reasoning, time: time);
+            role: role,
+            text: content,
+            reasoning: reasoning,
+            time: time,
+            attachments: refs);
         // Same trace-visibility gate as the history hydrator.
         msg.effectiveReasoning = _showReasoning ? reasoning : '';
         _messages.add(msg);
@@ -2316,9 +2497,13 @@ class ChatStore extends ChangeNotifier {
       // A decision belonging to the outgoing conversation must not survive
       // into the new one: answering it later would pair its request id with the
       // new session id. Cleared here for the same reason resumeSession clears.
+      // (A queued value prompt for the outgoing conversation is NOT lost: its
+      // request is still open on the gateway and re-arms from `open_requests`
+      // when that conversation is opened again.)
       _pendingRequest = null;
+      _pendingCardRequestId = null;
       _clarifyAnswers.clear();
-      _pendingValueRequest = null;
+      _pendingValueRequests.clear();
       // Detach the outgoing session's gateway images BEFORE switching.
       // On success the refs are removed; on failure they are preserved
       // (with a visible error) so no queued image is silently lost.
@@ -2757,8 +2942,23 @@ class ChatStore extends ChangeNotifier {
     // Track the optimistic row by IDENTITY: the stale-runtime recovery below
     // rehydrates the transcript (dropping it), and the failure path must be
     // able to remove exactly this row — never a look-alike.
-    final optimistic =
-        ChatMessage(role: 'user', text: fullText, time: DateTime.now());
+    // The row carries its attachment refs as DATA (issue #33): the gateway
+    // still receives the full text with `@file:` refs, but the transcript
+    // renders the refs as a thumbnail/chip instead of raw tokens, and an
+    // image - which never appears in the text at all - gets a visible trace.
+    final extracted = ChatMessage.extractAttachmentRefs(fullText);
+    final optimistic = ChatMessage(
+        role: 'user',
+        text: extracted.text,
+        time: DateTime.now(),
+        attachments: [
+          ...extracted.refs,
+          // Image refs are not part of the text; they live in the pending
+          // attachment set until the gateway stages them.
+          for (final ref in _pendingAttachments)
+            if (!ref.startsWith('@file:') && !extracted.refs.contains(ref))
+              '@image:$ref',
+        ]);
     _messages.add(optimistic);
     _streaming = true;
     _statusLine = 'Thinking…';
@@ -3622,10 +3822,16 @@ class ChatStore extends ChangeNotifier {
     final req = _pendingRequest;
     if (req == null) return; // No pending request to answer.
     final requestId = (req.payload['request_id'] ?? '').toString();
+    // Transport identity captured NOW: if the send fails and the card is
+    // restored for retry, the restored card must keep the id `request.cancel`
+    // names, or the gateway can no longer withdraw what the user is looking
+    // at (round-56 review finding 3).
+    final capturedCardId = _pendingCardRequestId;
     if (requestId.isEmpty) {
       // Without an id the request can never be answered; drop it rather than
       // trapping the user behind a card that cannot be dismissed.
       _pendingRequest = null;
+      _pendingCardRequestId = null;
       _clarifyAnswers.clear();
       _fail('That prompt could not be answered (no request id); it was cleared.');
       return;
@@ -3658,6 +3864,7 @@ class ChatStore extends ChangeNotifier {
     final wasBatchQuestion = isBatchQuestion;
     if (!wasBatchQuestion) {
       _pendingRequest = null;
+      _pendingCardRequestId = null;
       _clarifyAnswers.clear();
       _statusLine = '';
       _notify();
@@ -3673,6 +3880,12 @@ class ChatStore extends ChangeNotifier {
           return;
         }
         _pendingRequest = null;
+        // Clear the transport id only if the card is STILL the one this
+        // answer was for; a new request that arrived during the await owns
+        // its own identity now.
+        if (_pendingCardRequestId == capturedCardId) {
+          _pendingCardRequestId = null;
+        }
         _clarifyAnswers.clear();
         _statusLine = '';
       }
@@ -3682,13 +3895,21 @@ class ChatStore extends ChangeNotifier {
         // The gateway no longer holds this request (answered elsewhere, or it
         // expired): clear it instead of re-arming a card that cannot be closed.
         _pendingRequest = null;
+        if (_pendingCardRequestId == capturedCardId) {
+          _pendingCardRequestId = null;
+        }
         _clarifyAnswers.clear();
         _notify();
         return;
       }
       // A real transport failure keeps the card so the user can retry, and
       // says so: a silent swallow would make an approval look confirmed.
-      _pendingRequest = req;
+      // Restore event AND transport id together so a later `request.cancel`
+      // can still name this exact card.
+      if (_pendingRequest == null) {
+        _pendingRequest = req;
+        _pendingCardRequestId = capturedCardId;
+      }
       _fail('Reply not sent: ${_shortError(e)}');
     }
     _notify();
@@ -3704,6 +3925,7 @@ class ChatStore extends ChangeNotifier {
     if (req == null) return;
     final requestId = (req.payload['request_id'] ?? '').toString();
     _pendingRequest = null;
+    _pendingCardRequestId = null;
     _clarifyAnswers.clear();
     _statusLine = '';
     _notify();
@@ -4122,6 +4344,13 @@ class ChatStore extends ChangeNotifier {
     _activeSessionId = null;
     _activeStoredSessionId = null;
     _pendingRequest = null;
+    // The transport identity and the queued value prompts belong to the
+    // connection that just closed: stale ids left here suppress the same
+    // still-open request a reconnect re-delivers (`_requestKnown`), and an
+    // old queued prompt would sit ahead of the new gateway's prompts.
+    _pendingCardRequestId = null;
+    _pendingValueRequests.clear();
+    _clarifyAnswers.clear();
     _sessions.clear();
     _messages.clear();
     _activeGoal = null;

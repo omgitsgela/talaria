@@ -2256,7 +2256,9 @@ class _ComposerState extends State<_Composer> {
                 // Send would answer the new request with the old secret.
                 key: ValueKey('value-${store.pendingValueRequest!.id}'),
                 request: store.pendingValueRequest!,
-                onSubmit: store.respondValue,
+                queuedCount: store.pendingValueRequests.length - 1,
+                onSubmit: (value, requestId) =>
+                    store.respondValue(value, requestId: requestId),
               ),
             QueuedPromptStrip(
               prompts: store.queuedPrompts,

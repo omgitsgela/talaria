@@ -295,7 +295,7 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(store.pendingValueRequest?.method, 'sudo');
 
-    store.respondValue('secret-value');
+    store.respondValue('secret-value', requestId: '11');
     expect(store.pendingValueRequest, isNull);
     expect(gw.replies.single['id'], 11);
     expect((gw.replies.single['result'] as Map)['value'], 'secret-value');
@@ -314,7 +314,7 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(store.pendingValueRequest?.params['env_var'], 'OPENAI_API_KEY');
 
-    store.respondValue('sk-not-a-real-key');
+    store.respondValue('sk-not-a-real-key', requestId: '12');
     expect((gw.replies.single['result'] as Map)['value'], 'sk-not-a-real-key');
   });
 

@@ -20,10 +20,18 @@ class SecretPromptCard extends StatefulWidget {
     super.key,
     required this.request,
     required this.onSubmit,
+    this.queuedCount = 0,
   });
 
   final ServerRequest request;
-  final void Function(String value) onSubmit;
+  /// Receives the typed value AND the request id this card was built for, so
+  /// the store can reject a submission whose request was withdrawn mid-frame.
+  final void Function(String value, String requestId) onSubmit;
+
+  /// How many MORE value prompts are queued behind this one (issue #31:
+  /// prompts queue instead of replacing each other). Says so on the card so
+  /// the user knows answering this one is not answering all of them.
+  final int queuedCount;
 
   @override
   State<SecretPromptCard> createState() => _SecretPromptCardState();
@@ -44,7 +52,7 @@ class _SecretPromptCardState extends State<SecretPromptCard> {
   void _submit() {
     final value = _controller.text;
     _controller.clear();
-    widget.onSubmit(value);
+    widget.onSubmit(value, widget.request.id.toString());
   }
 
   @override
@@ -97,6 +105,17 @@ class _SecretPromptCardState extends State<SecretPromptCard> {
             const SizedBox(height: 6),
             Text(prompt, style: theme.textTheme.bodySmall),
           ],
+          if (widget.queuedCount > 0) ...[
+            const SizedBox(height: 6),
+            Text(
+              widget.queuedCount == 1
+                  ? '1 more prompt is waiting after this one.'
+                  : '${widget.queuedCount} more prompts are waiting after this one.',
+              key: const ValueKey('secret_prompt_queued_note'),
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: cs.onSurfaceVariant),
+            ),
+          ],
           const SizedBox(height: 8),
           TextField(
             key: const ValueKey('secret_prompt_field'),
@@ -129,7 +148,8 @@ class _SecretPromptCardState extends State<SecretPromptCard> {
                 key: const ValueKey('secret_prompt_skip'),
                 // An empty value is the gateway's own "skipped" answer, so the
                 // agent stops waiting instead of hanging until its timeout.
-                onPressed: () => widget.onSubmit(''),
+                onPressed: () =>
+                    widget.onSubmit('', widget.request.id.toString()),
                 child: const Text('Skip'),
               ),
             ],

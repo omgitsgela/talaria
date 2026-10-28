@@ -561,6 +561,29 @@ class GatewayClient {
             {'session_id': entry.key, 'last_seen': entry.value},
             10000,
           );
+          // Re-deliver requests still open on the gateway (the ring cannot
+          // carry "a question still waiting", so server.py answers this field
+          // for reconnecting clients). Without this, a prompt that arrived
+          // during the socket drop is invisible until its agent times out.
+          final openReqs = res['open_requests'];
+          if (openReqs is List && !_disposed) {
+            for (final entry2 in openReqs) {
+              if (entry2 is! Map) continue;
+              final params = entry2['params'] is Map<String, dynamic>
+                  ? Map<String, dynamic>.from(entry2['params'] as Map)
+                  : const <String, dynamic>{};
+              final req = ServerRequest(
+                id: entry2['id'] ?? '',
+                method: (entry2['method'] ?? '').toString(),
+                params: params,
+                sessionId: params['session_id'] is String
+                    ? params['session_id'] as String
+                    : entry.key,
+              );
+              if (req.method.isEmpty) continue;
+              if (!_requestController.isClosed) _requestController.add(req);
+            }
+          }
           final events = res['events'];
           if (events is List) {
             for (final e in events) {

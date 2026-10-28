@@ -3,6 +3,32 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.3.16
+
+### build 55
+Fixes three open tracker bugs, then fixes six more found by an independent adversarial
+review of those fixes. 545 tests green (23 new).
+
+- **A sent attachment now leaves a trace (#33).** Attached images appeared nowhere in the
+  transcript — not as text, not after a reload. Attachment refs became first-class message
+  data: the store carries them on the row the moment you send, hydration pulls them out of
+  the gateway's persisted text, and your bubble renders a thumbnail for an image and a chip
+  naming a file. Reconciled history reads update retained rows too. Literal code is not
+  mistaken for an attachment: an indented or unclosed-fence `@file:` look-alike stays text,
+  exactly like the gateway's own line-anchored grammar.
+- **Concurrent sudo/secret prompts queue instead of replacing (#31 remainder).** A second
+  password prompt used to silently overwrite the first; the replaced request stayed parked
+  until its timeout. Prompts now queue in arrival order (with a "N more prompts are waiting"
+  note), a submission names the request its card was built for (a stale card can no longer
+  answer a different request with the wrong secret), the gateway's real withdrawal event
+  `request.cancel` is handled (the app had dead branches for events that never exist), and
+  resume/reconnect re-arm and reconcile the gateway's `open_requests` snapshot — including
+  retiring prompts another surface answered while you were disconnected.
+- **Hiding the reasoning trace actually repaints the transcript (#8).** The display toggle
+  changed what the row showed without moving the revision the row memo watches, so cached
+  bubbles stayed frozen until an unrelated rebuild. The setter now bumps revision exactly
+  when the displayed value changes.
+
 ## 1.3.15
 
 ### build 54

@@ -179,6 +179,45 @@ class _MessageBubbleState extends State<MessageBubble> {
     }
     flushTools();
 
+    // Attachments render as their own trace (#33): the refs ride on the
+    // message, not the text, so a sent image shows a thumbnail (from the
+    // retained bytes, or an honest placeholder for a reloaded session) and a
+    // sent file shows a chip naming it.
+    final attachmentWidgets = <Widget>[
+      for (final ref in message.attachments)
+        if (ref.startsWith('@image:'))
+          _TranscriptImage(
+            source: ChatMessage.unwrapAttachmentRef(ref),
+            label: _attachmentLabel(ref),
+          )
+        else
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                    color: theme.colorScheme.outlineVariant),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.attach_file,
+                      size: 14, color: theme.colorScheme.onSurfaceVariant),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(_attachmentLabel(ref),
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: theme.colorScheme.onSurface)),
+                  ),
+                ],
+              ),
+            ),
+          ),
+    ];
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       child: Column(
@@ -186,6 +225,7 @@ class _MessageBubbleState extends State<MessageBubble> {
             isUser ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
           ...children,
+          ...attachmentWidgets,
           if (!isUser &&
               message.pending &&
               message.text.isEmpty &&
@@ -368,6 +408,20 @@ bool _isImageUrl(String source) {
   return uri != null &&
       RegExp(r'\.(png|jpe?g|gif|webp|bmp|avif|heic|svg)$', caseSensitive: false)
           .hasMatch(uri.path);
+}
+
+/// Human name for an attachment chip / image label: the staged path's leaf.
+String _attachmentLabel(String ref) {
+  final value = ChatMessage.unwrapAttachmentRef(ref);
+  final leaf = value.split('/').where((s) => s.isNotEmpty).isEmpty
+      ? value
+      : value.split('/').lastWhere((s) => s.isNotEmpty);
+  // Staged upload names are meaningless to read; call an image what it is.
+  if (RegExp(r'^(upload_|image_|screenshot)[^/]*$', caseSensitive: false)
+      .hasMatch(leaf)) {
+    return 'Image';
+  }
+  return leaf;
 }
 
 String _imageMarkdown(String text) {
