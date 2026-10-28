@@ -6,7 +6,7 @@ rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.d
 ## 1.3.17
 
 ### build 56
-Sign-in and re-auth, rebuilt after field testing. 578 tests green (34 new, including
+Sign-in and re-auth, rebuilt after field testing. 575 tests green (34 new, including
 nine written by an independent adversarial review before any fix was applied).
 
 - **The sign-in page is now always reachable.** "Sign in with Hermes" used to appear
