@@ -7,7 +7,7 @@ import 'package:web_socket_channel/io.dart';
 import 'config.dart';
 import 'http_service.dart';
 
-enum GwConnectionState { idle, connecting, open, closed, error, reconnecting }
+enum GwConnectionState { idle, connecting, open, closed, error, reconnecting, authRequired }
 
 /// Event envelope the gateway emits:
 /// `{"jsonrpc":"2.0","method":"event","params":{"type":..., "session_id":..., "seq":N, "payload":{...}}}`
@@ -44,6 +44,25 @@ class GatewayError implements Exception {
   final Object? data;
   @override
   String toString() => 'GatewayError(${code ?? '-'}): $message';
+}
+
+/// A dial rejected by the gateway's auth gate, carrying what the server said.
+/// The server distinguishes a terminal rejection (the credential is dead —
+/// retrying it forever is a credential-eating backoff loop) from a transient
+/// failure. `sessionExpired` means the server knows the session is over
+/// (e.g. a gateway restart or a revocation); `unauthenticated` means the
+/// presented credential simply was not accepted.
+class GatewayAuthError extends GatewayError {
+  GatewayAuthError(super.message,
+      {required this.sessionExpired, this.reason = '', this.loginUrl});
+
+  /// True when the server named the session dead: stored credentials must be
+  /// dropped and a fresh sign-in is the only way back in.
+  final bool sessionExpired;
+  final String reason;
+
+  /// The gateway's own sign-in page, when it offered one.
+  final String? loginUrl;
 }
 
 /// JSON-RPC 2.0 client over the Hermes tui_gateway WebSocket sidecar.
@@ -189,7 +208,17 @@ class GatewayClient {
   int _generation = 0;
   GwConnectionState _state = GwConnectionState.idle;
 
+  /// The most recent auth rejection, when [_state] is authRequired. Carries
+  /// what the gateway said (session expired vs. unaccepted credential) so the
+  /// UI can explain the situation instead of showing a generic offline state.
+  GatewayAuthError? _authFailure;
+
   GwConnectionState get state => _state;
+  GatewayAuthError? get authFailure => _authFailure;
+
+  /// True when the socket is parked because the gateway rejected the
+  /// credential, not because the network is down.
+  bool get needsReauth => _state == GwConnectionState.authRequired;
   Stream<GwConnectionState> get stateChanges => _stateController.stream;
 
   /// How many reconnect attempts have been made in the current outage episode
@@ -258,6 +287,11 @@ class GatewayClient {
     _setState(isReconnect ? GwConnectionState.reconnecting : GwConnectionState.connecting);
     _connectInFlight = true;
     _connectCompleter = Completer<void>();
+    // A fresh dial starts with no recorded rejection. Without this, a stale
+    // authFailure from an earlier episode would be handed to joiners of an
+    // unrelated failure (a plain network error mislabeled "sign in
+    // required"), and reauthExplanation would quote a dead episode's words.
+    _authFailure = null;
     final gen = ++_generation;
     try {
       try {
@@ -304,8 +338,23 @@ class GatewayClient {
       } catch (e) {
         final cancellation = e is GatewayError &&
             e.message == 'connection cancelled during auth';
+        final authRejected = e is GatewayAuthError;
         _cleanupChannel();
         if (cancellation) rethrow; // already torn down; do not schedule
+        if (authRejected) {
+          // A credential the GATEWAY itself rejected. Re-dialing it is not a
+          // transient network problem: every attempt presents a dead
+          // credential to the auth gate (refresh tokens burn when they are
+          // replayed), and the old backoff loop made a gateway restart look
+          // like an outage forever. Park in authRequired instead: the owner
+          // sees "sign in required" and the only way forward is a fresh
+          // sign-in. No reconnect is scheduled.
+          if (gen == _generation) {
+            _authFailure = e;
+            _setState(GwConnectionState.authRequired);
+          }
+          rethrow;
+        }
         final wrapped =
             e is GatewayError ? e : GatewayError('WebSocket connection failed: $e');
         _failReconnect(wrapped, gen);
@@ -336,8 +385,14 @@ class GatewayClient {
       if (c != null && !c.isCompleted) {
         if (hadJoiners && _state != GwConnectionState.open) {
           // Joiners observe the shared future's error; the primary
-          // already got the rethrown exception directly.
-          c.completeError(GatewayError('gateway connect failed'));
+          // already got the rethrown exception directly. The typed kind
+          // must survive the handoff: joiners of an auth-rejected dial
+          // need GatewayAuthError, not the generic placeholder — the UI
+          // branches on the type, and a joiner (Home sheet Reconnect while
+          // a background dial is in flight) that only saw the generic error
+          // would show "network failure" for a rejected credential.
+          c.completeError(_authFailure ??
+              GatewayError('gateway connect failed'));
         } else {
           c.complete();
         }
@@ -438,6 +493,23 @@ class GatewayClient {
   void _onDone() {
     if (_manualClose || _disposed) return;
     _stopHeartbeat();
+    // The gateway closes an auth-rejected socket with 4401 (verified against
+    // the gateway source: hermes_cli/web_routers/chat_ws.py _ws_gate closes
+    // code=4401 reason="auth: ..."). Loopback token-auth gateways reject at
+    // the WS layer — they never mint a ticket — so without this the dead
+    // token fell into the generic backoff loop and kept re-presenting itself.
+    final code = _channel?.closeCode;
+    if (code == 4401) {
+      _authFailure = GatewayAuthError(
+        'The gateway rejected the stored sign-in (WebSocket close 4401)',
+        sessionExpired: true,
+        reason: 'auth rejected at the WebSocket gate',
+      );
+      _cleanupChannel();
+      _rejectAll(_authFailure!);
+      _setState(GwConnectionState.authRequired);
+      return; // no reconnect scheduled: a new credential is required
+    }
     _rejectAll(GatewayError('WebSocket closed'));
     _scheduleReconnect();
   }

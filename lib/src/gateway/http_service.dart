@@ -89,17 +89,29 @@ class GatewayHttp {
 
   /// The gateway's advertised auth flows (public /api/status `auth_flows`).
   /// Returns an empty list when the gateway predates the field.
-  Future<List<String>> authFlows() async {
+  /// [throwOnTransportError] distinguishes "the gateway did not answer"
+  /// (throw, so a caller can retry a gateway that is still starting) from
+  /// "it answered but advertises no flows" (empty list). Callers that only
+  /// want the list keep the swallow-everything default.
+  Future<List<String>> authFlows(
+      {bool throwOnTransportError = false}) async {
     try {
       final res = await _client
           .get(Uri.parse(config.httpUrl('/api/status')), headers: _headers())
           .timeout(const Duration(seconds: 10));
-      if (res.statusCode != 200) return const [];
+      if (res.statusCode != 200) {
+        if (throwOnTransportError) {
+          throw GatewayError('gateway answered /api/status with '
+              'HTTP ${res.statusCode}');
+        }
+        return const [];
+      }
       final body = _tryJson(res.body);
       final flows = body?['auth_flows'];
       if (flows is! List) return const [];
       return flows.map((e) => e.toString()).toList();
     } catch (_) {
+      if (throwOnTransportError) rethrow;
       return const [];
     }
   }
@@ -112,6 +124,22 @@ class GatewayHttp {
         .post(Uri.parse(config.httpUrl('/api/auth/ws-ticket')),
             headers: _headers())
         .timeout(const Duration(seconds: 10));
+    if (res.statusCode == 401) {
+      // The auth gate answers 401 with a JSON body naming WHY (verified
+      // against the gateway: hermes_cli/dashboard_auth/middleware.py
+      // _unauth_response -> {error: session_expired|unauthenticated,
+      // reason, login_url}). Discarding it (the old behavior) made a dead
+      // credential look like a generic network failure, which fed the
+      // endless reconnect loop and left the app unable to explain itself.
+      final body = _tryJson(res.body);
+      final kind = (body?['error'] ?? '').toString();
+      throw GatewayAuthError(
+        'Gateway rejected the stored sign-in (HTTP 401)',
+        sessionExpired: kind == 'session_expired',
+        reason: (body?['reason'] ?? '').toString(),
+        loginUrl: body?['login_url']?.toString(),
+      );
+    }
     if (res.statusCode != 200) {
       throw HttpException('WS ticket HTTP ${res.statusCode}');
     }

@@ -1500,6 +1500,7 @@ class _ChatAppbar extends StatelessWidget {
         listenable: store,
         builder: (sheetContext, _) {
           final connected = store.connection == GwConnectionState.open;
+          final reauth = store.needsReauth;
           final model = store.currentModel;
           return SafeArea(
             child: Padding(
@@ -1512,18 +1513,36 @@ class _ChatAppbar extends StatelessWidget {
                   Row(
                     children: [
                       Icon(
-                        connected ? Icons.check_circle : Icons.error_outline,
+                        connected
+                            ? Icons.check_circle
+                            : (reauth
+                                ? Icons.lock_reset
+                                : Icons.error_outline),
                         color: connected ? cs.primary : cs.error,
                         size: 20,
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        connected ? 'Connected' : 'Disconnected',
+                        connected
+                            ? 'Connected'
+                            : (reauth ? 'Sign-in required' : 'Disconnected'),
                         style: theme.textTheme.titleMedium,
                       ),
                     ],
                   ),
                   const SizedBox(height: 12),
+                  // Why the connection is down. The old sheet said
+                  // "Disconnected" + Reconnect even when the gateway had
+                  // REJECTED the credential (e.g. after a gateway restart):
+                  // reconnecting the dead credential could never work, and
+                  // Reconnect kept presenting it.
+                  if (reauth) ...[
+                    Text(store.reauthExplanation,
+                        key: const ValueKey('home_reauth_explanation'),
+                        style: theme.textTheme.bodyMedium
+                            ?.copyWith(color: cs.error)),
+                    const SizedBox(height: 12),
+                  ],
                   // Gateway info
                   if (host.isNotEmpty) ...[
                     Text('Gateway',
@@ -1542,7 +1561,24 @@ class _ChatAppbar extends StatelessWidget {
                     const SizedBox(height: 16),
                   ],
                   // Actions
-                  if (!connected)
+                  if (reauth)
+                    FilledButton.icon(
+                      key: const ValueKey('home_sign_in_again'),
+                      onPressed: () {
+                        Navigator.of(sheetContext).pop();
+                        final app = AppScope.maybeOf(context);
+                        if (app == null) {
+                          // No model in scope (test seam): fall back to a
+                          // plain reconnect rather than doing nothing.
+                          store.connect();
+                          return;
+                        }
+                        unawaited(app.reauthSignIn());
+                      },
+                      icon: const Icon(Icons.login),
+                      label: const Text('Sign in again'),
+                    )
+                  else if (!connected)
                     FilledButton.icon(
                       onPressed: () {
                         Navigator.of(sheetContext).pop();

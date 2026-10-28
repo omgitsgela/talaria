@@ -3,6 +3,42 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.3.17
+
+### build 56
+Sign-in and re-auth, rebuilt after field testing. 578 tests green (34 new, including
+nine written by an independent adversarial review before any fix was applied).
+
+- **The sign-in page is now always reachable.** "Sign in with Hermes" used to appear
+  only when a background gateway probe had already succeeded — which is exactly when
+  you have a working credential, not when you need one. The OAuth tab now always
+  offers the sign-in button, the Token tab offers a link into it, and a failed probe
+  can no longer erase a sign-in option the app already knows about.
+- **Gateway restarts are explained, not retried forever.** When the gateway ends your
+  session (a restart or revocation), the stored credential is now retired the moment
+  the server rejects it — over the HTTP ticket call (401) and over the socket itself
+  (close code 4401) — and the app parks in "Sign-in required" with a plain-language
+  reason instead of presenting a dead token to the gateway in a reconnect loop.
+- **"Sign in again" from the connection sheet keeps your conversation.** Re-auth from
+  inside the app re-dials the live connection with the fresh credential: the open
+  conversation, its transcript, and queued work survive. Previously it tore down the
+  whole session and opened a brand-new conversation.
+- **Explicit sign-in opens the browser.** Pressing Sign in no longer short-circuits to
+  a locally-stored token that the gateway may have already revoked; a new session
+  starts with a real browser sign-in.
+- **Abandoned browser sign-ins can be cancelled.** A Cancel button releases the sign-in
+  flow at any stage — browser launch, callback wait, or token exchange — re-arms the
+  form, and a cancelled flow can never silently complete into a stored session.
+- **Failed connections now say why.** The connect screen shows the last failure (auth
+  rejection vs. network) and re-arms after a stalled attempt instead of sitting on a
+  spinner until the dial timeout. A gateway that was still starting up gets one quiet
+  automatic re-discovery.
+- **Safety hardening found in review:** saved proxy headers (e.g. Cloudflare Access
+  secrets) are now bound to the gateway they were saved for and are never sent to a
+  different host you type into the URL field; a slow superseded connection attempt can
+  no longer undo a newer successful one; a late rejection-cleanup can no longer delete
+  a credential from a sign-in that finished in the meantime.
+
 ## 1.3.16
 
 ### build 55

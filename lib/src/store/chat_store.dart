@@ -101,6 +101,28 @@ class ChatStore extends ChangeNotifier {
   String? _connectError;
   String? get connectError => _connectError;
 
+  /// True when the gateway REJECTED the credential (authRequired), as opposed
+  /// to the network being down. The UI uses this to offer "Sign in again"
+  /// instead of an infinite Reconnect loop.
+  bool get needsReauth => _conn == GwConnectionState.authRequired;
+
+  /// The auth rejection, from whichever side learned it first: this store's
+  /// own connect failure, or the client's parked dial (e.g. a background
+  /// reconnect that got rejected).
+  GatewayAuthError? _authError;
+
+  /// Plain-language explanation of the rejection, from the gateway's own
+  /// words (session expired vs. credential not accepted).
+  String get reauthExplanation {
+    final f = _authError ?? _client.authFailure;
+    if (f == null) return 'Your sign-in is no longer valid. Sign in again.';
+    return f.sessionExpired
+        ? 'The gateway ended your signed-in session (a gateway restart or '
+            'revocation does this). Sign in again to reconnect.'
+        : 'The gateway did not accept your stored credential. Sign in again '
+            'to reconnect.';
+  }
+
   // Sessions
   final List<SessionRow> _sessions = [];
   List<SessionRow> get sessions => List.unmodifiable(_sessions);
@@ -1061,6 +1083,40 @@ class ChatStore extends ChangeNotifier {
 
   Future<ProbeResult> probe() => _http.testConnection();
 
+  /// Re-authorize the CURRENT connection in place: swap the credential the
+  /// live transport dials with and re-attach to the conversation the user
+  /// already has open. The transcript, queued work, and session selection
+  /// stay owned by this store - only the socket is re-dialed. This is the
+  /// Home "Sign in again" path; the Settings reconnect (which replaces the
+  /// whole store and opens a fresh conversation) must not be used for it.
+  Future<bool> reauthInPlace(String newBearer) async {
+    config.oauthToken = newBearer;
+    _authError = null;
+    _connectError = null;
+    _pendingCardRequestId = null;
+    _pendingValueRequests.clear();
+    try {
+      await _client.connect(isReconnect: true);
+    } catch (e) {
+      final authRejected = e is GatewayAuthError;
+      if (authRejected) _authError = e;
+      _connectError = authRejected ? reauthExplanation : e.toString();
+      notifyListeners();
+      return false;
+    }
+    // Transport is back: refresh the picker roster and re-attach the open
+    // conversation. Resuming the SAME stored id keeps the transcript rows
+    // (see shouldClearTranscriptOnSwitch); only the runtime id is renewed.
+    unawaited(loadSessions());
+    final stored = _activeStoredSessionId;
+    if (stored != null && stored.isNotEmpty) {
+      await resumeSession(stored, silent: true);
+    }
+    _connectError = null;
+    notifyListeners();
+    return _client.state == GwConnectionState.open;
+  }
+
   Future<void> connect() async {
     _connectError = null;
     notifyListeners();
@@ -1099,15 +1155,74 @@ class ChatStore extends ChangeNotifier {
       unawaited(_fg.start());
       if (!_disposed) notifyListeners();
     } catch (e) {
-      _connectError = e.toString();
-      _conn = GwConnectionState.error;
+      final authRejected = e is GatewayAuthError;
+      if (authRejected) {
+        _authError = e;
+        // Drop any queued live-request state: the next established connection
+        // re-arms from the gateway snapshot, and stale ids would suppress it.
+        _pendingCardRequestId = null;
+        _pendingValueRequests.clear();
+      }
+      if (authRejected && e.sessionExpired) {
+        // The server itself declared the session dead. Invalidate BOTH copies
+        // of the native credential: the live config bearer (so no later dial
+        // can replay a dead token) and the record for the sign-in screen (so
+        // it explains instead of pre-filling garbage). A manually pasted
+        // bearer has no stored set to clear - the reason marker still makes
+        // the screen honest. The stored-side cleanup is BOUND to the token
+        // this dial presented: a late cleanup must never delete a credential
+        // the user signed in with in the meantime.
+        final presented = config.oauthToken;
+        config.oauthToken = '';
+        unawaited(_invalidateStoredOAuth(e, presented));
+      }
+      // The client already parked in authRequired for a rejected credential;
+      // do NOT overwrite that with generic error — the UI branches on it.
+      _connectError = authRejected
+          ? reauthExplanation
+          : e.toString();
+      _conn = authRejected ? GwConnectionState.authRequired : GwConnectionState.error;
       notifyListeners();
       rethrow;
     }
   }
 
+  Future<void> _invalidateStoredOAuth(
+      GatewayAuthError e, String presentedAccessToken) async {
+    final runner = _oauth;
+    if (runner == null) return;
+    try {
+      await runner.store.invalidateRejected(
+        config.baseUrl,
+        expectedAccessToken: presentedAccessToken,
+        reason: e.sessionExpired ? 'session_expired' : 'credential_rejected',
+      );
+    } catch (_) {
+      // Secure storage failure must not change the connection outcome.
+    }
+  }
+
   void _onState(GwConnectionState s) {
     _conn = s;
+    if (s == GwConnectionState.authRequired) {
+      // A rejection the CLIENT itself detected (a background backoff dial, or
+      // the WS-layer 4401 close) reaches the store through stateChanges, not
+      // through connect's catch. Invalidate here too: a dead bearer left in
+      // the live config gets re-presented by every later dial, and the
+      // stored set would keep pre-filling on the sign-in screen.
+      final e = _client.authFailure;
+      _authError = e;
+      _pendingCardRequestId = null;
+      _pendingValueRequests.clear();
+      _connectError = e != null ? reauthExplanation : null;
+      _streaming = false;
+      _statusLine = '';
+      if (e != null && e.sessionExpired) {
+        final presented = config.oauthToken;
+        config.oauthToken = '';
+        unawaited(_invalidateStoredOAuth(e, presented));
+      }
+    }
     if (s == GwConnectionState.reconnecting) {
       _streaming = false;
       _statusLine = 'Connection lost — reconnecting…';
@@ -1127,6 +1242,7 @@ class ChatStore extends ChangeNotifier {
       // Manual teardown (user disconnect / dispose): drop the keep-alive.
       _streaming = false;
       _statusLine = '';
+      _authError = null;
       unawaited(_fg.stop());
     } else if (s == GwConnectionState.error) {
       // Transient dial failure during a reconnect episode. Keep the process
