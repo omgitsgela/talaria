@@ -3,6 +3,37 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.4.0
+
+### build 57
+Chat-window media and selection, at desktop parity. 594 tests green (19 new).
+
+- **Delivered images now show up in chat, wherever the agent names them.**
+  `MEDIA:` delivery tags used to render only when the tag sat alone on its
+  own line; an agent that writes "here you go: MEDIA:/path/photo.png" mid-
+  sentence showed raw text. The tag parser is now the desktop client's own
+  rules ported to Dart: tags recognized anywhere in prose, paths with interior
+  spaces anchored on a known file extension, quoted values as the escape hatch
+  for odd names, and sentence punctuation that trails a tag stays prose.
+  Degenerate captures (`MEDIA:...`, a bare word) stay plain text rather than
+  becoming dead links.
+- **Non-image deliveries become named chips, not raw paths.** A delivered
+  PDF, audio clip, or archive renders as a chip naming the file; tapping it
+  opens a detail sheet (name, kind, full path, and a copy-path button), since
+  the phone cannot open a gateway-side file directly. Sent `@file:` attachment
+  chips gained the same sheet.
+- **Inline images keep their natural size.** Transcript images used to be
+  letterboxed into a fixed 320x240 frame, so a wide screenshot floated in
+  empty space. They now render at natural size, never upscaled, inside the
+  same maximum frame; tap-to-zoom is unchanged.
+- **Text selection works across a whole bubble.** Long-press → Select all
+  previously stopped at the one text run it was pressed in; a reply split by
+  a tool call copied only one half. Each bubble is now a single selection
+  region (like the desktop), so selection and copy span every text part,
+  fenced code blocks are copyable, and the selection region hugs the content
+  so vertical scrolling still wins the gesture on the empty lane beside a
+  bubble.
+
 ## 1.3.17
 
 ### build 56

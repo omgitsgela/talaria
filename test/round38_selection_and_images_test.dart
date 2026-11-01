@@ -119,13 +119,24 @@ void main() {
         await tester.tap(find.text('Reasoning'));
         await tester.pumpAndSettle();
       }
-      await tester.longPress(find.byType(SelectableText));
+      // Build 57+: the bubble wraps its content in ONE SelectionArea and the
+      // runs are plain Text widgets (per-part SelectableTexts made "Select
+      // all" stop at the part). Long-press lands on the text run; the region
+      // handles the selection.
+      await tester.longPress(find.text(text).first);
       await tester.pumpAndSettle();
       await tester.tap(find.text('Select all'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Copy'));
       await tester.pumpAndSettle();
-      expect(copied, text);
+      if (reasoning) {
+        // One selection region per bubble: "Select all" also takes the
+        // visible 'Reasoning' tile label (it is inside the region). The
+        // trace paragraphs themselves copy intact.
+        expect(copied, contains(text));
+      } else {
+        expect(copied, text);
+      }
     });
   }
 
