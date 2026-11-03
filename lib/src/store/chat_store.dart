@@ -1499,6 +1499,40 @@ class ChatStore extends ChangeNotifier {
   bool _yoloActive = false;
   bool get yoloActive => _yoloActive;
 
+  /// Toggle the SESSION yolo flag through the gateway's verified config.set
+  /// path, then trust the ANSWER (and its session.info echo, which the event
+  /// handler already applies). Verify the TARGET, not the command echo: the
+  /// gateway computes `yolo` from three sources (session flag, process flag,
+  /// approvals.mode: off), so the reply value is the truth about whether
+  /// approvals are actually being skipped.
+  Future<void> _toggleSessionYolo(String sid, String arg) async {
+    try {
+      final res = await _client.request('config.set',
+          {'key': 'yolo', 'session_id': sid, if (arg.isNotEmpty) 'value': arg});
+      final value = (res['value'] ?? '').toString();
+      if (value == '1' || value == '0') {
+        final on = value == '1';
+        if (on != _yoloActive) {
+          _yoloActive = on;
+          _notify();
+        }
+        if (!_notices.isClosed) {
+          _notices.add(on
+              ? 'YOLO is ON for this conversation — dangerous commands run '
+                  'without asking.'
+              : 'YOLO is OFF — dangerous commands will ask first.');
+        }
+      } else {
+        // An answer with no verifiable value: re-read the flag from the next
+        // session.info rather than guessing which way the toggle moved.
+        _statusLine = 'YOLO state unconfirmed — waiting for the gateway to report it';
+        _notify();
+      }
+    } catch (e) {
+      _fail('Could not change YOLO: ${_shortError(e)}');
+    }
+  }
+
   void _onServerRequest(ServerRequest req) {
     if (_requestKnown(req.id)) return;
     switch (req.method) {
@@ -2474,6 +2508,10 @@ class ChatStore extends ChangeNotifier {
         clearGoal();
         unawaited(refreshGoal());
         unawaited(_refreshContextUsage());
+        // A queue PAIRED to this conversation may have been waiting while it
+        // was off screen. If the conversation is idle now, run it; if a turn
+        // is running the drain defers to that turn's end as usual.
+        unawaited(_drainQueuedPrompts());
         notifyListeners();
       }
     }
@@ -2526,6 +2564,21 @@ class ChatStore extends ChangeNotifier {
       setLiveModel(info['model'] as String,
           provider:
               info['provider'] is String ? info['provider'] as String : null);
+    }
+    // YOLO is per conversation. The resume's session info carries the
+    // gateway's computed flag; without reading it here, the YoloBanner kept
+    // the PREVIOUS conversation's state until an unrelated session.info
+    // arrived (Angela's "/yolo is inconsistent" report). Always assign: a
+    // missing field means off, never "keep whatever the last conversation
+    // showed".
+    if (info is Map) {
+      final yolo = info['yolo'];
+      final on = yolo is bool && yolo;
+      if (on != _yoloActive) {
+        _yoloActive = on;
+      }
+    } else {
+      _yoloActive = false;
     }
     // The resumed session's effective reasoning effort (session.info carries
     // it; a per-session override made elsewhere must show in the header menu).
@@ -3269,6 +3322,22 @@ class ChatStore extends ChangeNotifier {
       return SlashDispatch(type: 'exec',
           output: cmd.isEmpty ? '' : 'No active session');
     }
+    // /yolo never goes through the slash worker. The worker's toggle lives in
+    // ITS process, and nothing verified the live session's flag afterwards —
+    // the banner only moved if an unrelated session.info happened to arrive,
+    // which is half of "/yolo is an inconsistent experience". Route it
+    // through the gateway's verified path instead: `config.set {key:'yolo',
+    // session_id}` (_set_yolo) toggles the SESSION flag, answers with the
+    // computed '1'/'0', and emits the session.info echo. Exactly what the
+    // desktop does when it maps /yolo to its status-bar control.
+    final headTok = cmd.split(RegExp(r'\s+')).first.toLowerCase();
+    if (headTok == '/yolo') {
+      final arg = cmd.length > headTok.length
+          ? cmd.substring(headTok.length).trim()
+          : '';
+      await _toggleSessionYolo(sid, arg);
+      return const SlashDispatch(type: 'exec', output: '');
+    }
     Map<String, dynamic> res;
     try {
       res = await _client
@@ -3318,7 +3387,14 @@ class ChatStore extends ChangeNotifier {
         if (msg.isEmpty) return;
         if (d.notice.trim().isNotEmpty) {
           // System line so the user sees what happened (e.g. "⊙ Goal set …").
+          // Also on `notices`: the trailing status pill is gone (build 23),
+          // so _statusLine alone renders nowhere. /steer on an idle session
+          // answers with a notice-carrying send ("No agent running; sent as
+          // next turn") — swallowing it is what made /steer feel random: the
+          // SAME command acked visibly while running and silently while idle
+          // (Angela's 1.4.0 report).
           _statusLine = d.notice.trim();
+          if (!_notices.isClosed) _notices.add(d.notice.trim());
           _notify();
         }
         // Mid-turn is fine: a busy gateway busy-queues the prompt, and the
@@ -3379,10 +3455,26 @@ class ChatStore extends ChangeNotifier {
   final Map<String, PendingAttachment> _queuedImages = {};
 
   /// Messages waiting to run after the current turn, oldest first.
+  ///
+  /// Entries live here even when their conversation is not on screen; the
+  /// pairing is in `QueuedPrompt.sessionId` (the STORED key, not the runtime
+  /// sid, which the gateway re-mints on every resume). Visibility and draining
+  /// are both filtered by it: a queue made in one conversation must never
+  /// display in, or drain into, another (Angela's 1.4.0 report).
   final List<QueuedPrompt> _queuedPrompts = [];
 
-  /// The queue as the UI shows it: everything not yet sent.
-  List<QueuedPrompt> get queuedPrompts => List.unmodifiable(_queuedPrompts);
+  /// True when [q] belongs to the conversation currently on screen. An entry
+  /// with no owning conversation (a pre-pairing persisted entry) drains into
+  /// whatever is active, matching the model's documented meaning of empty.
+  bool _queuedPromptOwnedByActive(QueuedPrompt q) {
+    if (q.sessionId.isEmpty) return true;
+    final active = _activeStoredSessionId;
+    return active != null && q.sessionId == active;
+  }
+
+  /// The queue as the UI shows it: the owning conversation's entries only.
+  List<QueuedPrompt> get queuedPrompts => List.unmodifiable(
+      _queuedPrompts.where(_queuedPromptOwnedByActive));
 
   static const String _queuedPrefsKey = 'queued_prompts_v1';
   bool _drainingQueued = false;
@@ -3416,7 +3508,12 @@ class ChatStore extends ChangeNotifier {
     _queuedPrompts.add(QueuedPrompt(
       id: 'q${DateTime.now().microsecondsSinceEpoch}',
       text: trimmed,
-      sessionId: _activeSessionId ?? '',
+      // PAIR TO THE STORED KEY. The runtime sid is re-minted on every resume,
+      // so pairing to it would orphan the queue the moment the conversation
+      // was left and re-opened. The session may not exist yet at send time
+      // (a send that first creates the draft); fall back to empty, which the
+      // model defines as "belongs to whatever is active when it drains".
+      sessionId: _activeStoredSessionId ?? '',
     ));
     _statusLine = 'Queued for the next turn';
     unawaited(_persistQueuedPrompts());
@@ -3468,19 +3565,26 @@ class ChatStore extends ChangeNotifier {
     return sent;
   }
 
-  /// Send the oldest queued message once the turn that was running has ended.
+  /// Send the oldest queued message of the CURRENT conversation once the turn
+  /// that was running has ended.
   ///
   /// One attempt per turn end, which is what bounds the retries: a send that
   /// fails (offline, gateway gone, session not live) leaves the message queued
   /// and visible, and the next completed turn tries again.
+  ///
+  /// Entries paired to ANOTHER conversation are never drained here: firing
+  /// them at whichever session happens to finish a turn is how a queue made in
+  /// one conversation ran in another. They drain when their own conversation
+  /// is on screen and idle (which a resume also attempts).
   Future<void> _drainQueuedPrompts() async {
     if (_drainingQueued) return;
-    if (_streaming || _queuedPrompts.isEmpty) return;
+    if (_streaming) return;
+    final i = _queuedPrompts.indexWhere(_queuedPromptOwnedByActive);
+    if (i < 0) return;
     if (_client.state != GwConnectionState.open) return;
     _drainingQueued = true;
     try {
-      final q = _queuedPrompts.first;
-      _queuedPrompts.removeAt(0);
+      final q = _queuedPrompts.removeAt(i);
       unawaited(_persistQueuedPrompts());
       _notify();
       // `asQueue: true` keeps the guarantee issue #2 was about: a message the
@@ -3489,7 +3593,7 @@ class ChatStore extends ChangeNotifier {
       // turn the app has not seen end). The flag is inert on an idle session.
       final sent = await send(q.text, asQueue: true);
       if (!sent) {
-        _queuedPrompts.insert(0, q);
+        _queuedPrompts.insert(i, q);
         unawaited(_persistQueuedPrompts());
         _notify();
       }

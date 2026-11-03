@@ -213,10 +213,15 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 20));
     first.dispose();
 
-    final second = ChatStore(config: _cfg, client: QGateway());
+    final secondGw = QGateway();
+    final second = ChatStore(config: _cfg, client: secondGw);
     addTearDown(second.dispose);
     await second.connect();
+    // The entry is PAIRED to 'stored-q' (round 59). Opening that idle
+    // conversation surfaces it and drains it INTO its own conversation.
+    await second.resumeSession('stored-q');
     await Future<void>.delayed(const Duration(milliseconds: 20));
-    expect(second.queuedPrompts.map((q) => q.text), contains('remember me'));
+    expect(secondGw.submittedTexts(), contains('remember me'),
+        reason: 'the queue survived the restart AND ran in its own conversation');
   });
 }

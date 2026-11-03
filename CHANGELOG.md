@@ -3,6 +3,40 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.4.1
+
+### build 58
+Three queue/steer/yolo/scroll bug fixes from Angela's 1.4.0 report. 611 tests green (16 new).
+
+- **`/queue` now sticks to the conversation it was made in.** A queued
+  message used to display in EVERY conversation and, worse, run at the end of
+  ANY conversation's turn: the queue was one global pile even though each
+  entry records its conversation. Now a queue is paired to its conversation
+  (by the stored session key, which survives reconnects), shows only there,
+  and only ever drains into it — including across an app restart. Open an
+  idle conversation with a waiting queue and it runs there, as intended.
+- **`/steer` gives the same feedback every time.** While a turn runs, steer
+  answers visibly; while the conversation is idle, the gateway still sends
+  the message as a next-turn prompt and says so — but that notice was
+  invisible in-app, so the same command felt random (feedback sometimes,
+  silence other times). The gateway's own "sent as next turn" notice now
+  shows as a toast, alongside the queued-while-running message.
+- **`/yolo` is now a verified per-conversation toggle.** It used to run as a
+  text command in the gateway's slash worker, and the app never checked the
+  live session's actual flag — the "approvals are OFF" banner could show the
+  PREVIOUS conversation's state and only moved when an unrelated event
+  happened to arrive. `/yolo` now goes through the same verified toggle the
+  desktop uses, confirms which way it moved, and switches conversations
+  re-read each conversation's own state.
+- **The transcript no longer snaps when a conversation's turn finishes.**
+  A parked reader (scrolled up) was thrown to the newest message the moment
+  a reply completed: the end of a turn collapses the transcript height, and
+  the position-hold's shrink guard expired exactly at that moment, dragging
+  the reader to a negative (impossible) offset that the follow logic then
+  misread as "the user chose the newest end" — pinning the view there. The
+  hold now never compensates a shrink and refuses out-of-range moves, and an
+  out-of-range position can never re-arm the follow against your intent.
+
 ## 1.4.0
 
 ### build 57

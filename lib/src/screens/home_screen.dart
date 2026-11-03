@@ -72,6 +72,13 @@ class _HomeScreenState extends State<HomeScreen> {
     _trackedStore?.setReaderAway(!stick);
   }
 
+  /// True when [pixels] is genuinely inside the near-bottom band (the newest
+  /// end). The check is TWO-sided on purpose: a NEGATIVE offset is out of
+  /// range, only plumbing can produce it, and reading it as "at the newest
+  /// end" re-arms the follow against the user's intent (the third link of the
+  /// 1.4.0 snap-at-turn-end chain).
+  static bool _inNewestBand(double pixels) => pixels >= -0.5 && pixels <= 48;
+
   /// Row keys carry the CHRONOLOGICAL message index, so a row stays identifiable
   /// as the list grows.
   static const String _rowKey = 'msg-';
@@ -209,7 +216,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // the band (the events after the finger lifts) re-arms the follow.
     final pos = _scroll.position;
     final dragging = pos.userScrollDirection != ScrollDirection.idle;
-    final atBottom = pos.pixels <= 48;
+    final atBottom = _inNewestBand(pos.pixels);
     // Only the USER may change the follow latch. A programmatic move - the
     // read-hold's own adjustment, the open jump, a layout clamp - must never
     // re-arm it from the resulting offset, because ANY path that lands the
@@ -256,7 +263,10 @@ class _HomeScreenState extends State<HomeScreen> {
     if (n.metrics.axis != Axis.vertical) return;
     if (!_scroll.hasClients) return;
     final pos = _scroll.position;
-    if (pos.pixels > 48) return;
+    // Only a genuine settle INSIDE the near-bottom band re-arms; an
+    // out-of-range (negative) offset is plumbing, never intent. See
+    // [_inNewestBand].
+    if (!_inNewestBand(pos.pixels)) return;
     _setStick(true);
     _pinnedMaxExtent = null;
     _updateArrow();
@@ -300,7 +310,7 @@ class _HomeScreenState extends State<HomeScreen> {
         // reference for content that has just been replaced.
         if (_scroll.hasClients) {
           final pos = _scroll.position;
-          _pinnedMaxExtent = pos.pixels <= 48 ? null : pos.maxScrollExtent;
+          _pinnedMaxExtent = _inNewestBand(pos.pixels) ? null : pos.maxScrollExtent;
         }
         _lastReadIndex.remove(sid);
         _updateArrow();
@@ -348,29 +358,30 @@ class _HomeScreenState extends State<HomeScreen> {
       final delta = np.maxScrollExtent - ref;
       if (delta.abs() < 0.5) return;
       _pinnedMaxExtent = np.maxScrollExtent;
-      // A SHRINK is not something the newest end of a streaming reply does, and
-      // applying one is how a reader gets dragged to the newest message. The
-      // trace row is an `ExpansionTile` whose height changes as it animates,
-      // reflows or is collapsed, so mid-stream the extent can drop by hundreds
-      // of pixels: the negative delta lands `pixels + delta` on the 0 clamp,
-      // and the follow latch then re-arms OFF that clamped offset, after which
-      // every streamed character pins the view to the bottom. Re-baseline
-      // instead of compensating: the offset is anchored at the newest end, so
-      // older content shrinking above the viewport does not move what is on
-      // screen.
-      if (delta < 0 && store.streaming) return;
+      // A SHRINK is never compensated, streaming or not. The offset is
+      // anchored at the newest end, so older content shrinking above the
+      // viewport does not move what is on screen: re-baseline and stay put.
+      // The turn ENDING is precisely when the biggest shrink lands (the
+      // streamed bubble is replaced by the canonical final text and the
+      // deferred history merge rewrites rows, and in a lazy list
+      // maxScrollExtent is an estimate that collapses as rows are
+      // re-measured). Gating this on `store.streaming` expired the rule at
+      // that exact moment: the reader was dragged by delta -62737 to a
+      // NEGATIVE offset, which _onScrollEnd then misread as intent, and the
+      // view snapped to the newest end ("history snaps when a conversation
+      // finishes", Angela's 1.4.0 report).
+      if (delta < 0) return;
       final target = np.pixels + delta;
-      if (target > np.maxScrollExtent + 0.5) {
+      // A move outside the scroll range does not exist, which means the
+      // measurement is stale rather than the content grown. Refuse BOTH
+      // out-of-range targets: the #19 guard caught the upper clamp landing
+      // the reader at the oldest message; the lower side is what dragged a
+      // reader negative at turn end.
+      if (target > np.maxScrollExtent + 0.5 || target < -0.5) {
         // There is not enough room above the reader for the move that would
-        // keep their content in place, which means the delta is not real growth.
-        // It comes from a STALE baseline: `target > max` is equivalent to
-        // `pixels > ref`, so the measurement was taken when the extent was
-        // smaller than where the reader now is, and the difference has been
-        // accumulating. Clamping here lands them at maxScrollExtent, which in
-        // this reversed list is the OLDEST message: measured on a parked reader,
-        // 3600 -> 40843 in a transcript of 8107. That is the reported jump to
-        // the very beginning. Hold still and re-baseline instead: a reader whose
-        // content cannot be kept in place is still better off where they are.
+        // keep their content in place, which means the delta is not real
+        // growth: a STALE baseline (`target > max` is equivalent to
+        // `pixels > ref`). Hold still; `ref` was just re-baselined above.
         return;
       }
       if ((target - np.pixels).abs() > 0.5) {
@@ -471,7 +482,7 @@ class _HomeScreenState extends State<HomeScreen> {
       _metricsResyncScheduled = false;
       if (!mounted || !_scroll.hasClients) return;
       final pos = _scroll.position;
-      final atBottom = pos.pixels <= 48;
+      final atBottom = _inNewestBand(pos.pixels);
       // A content-size change is never user intent, and while a turn streams the
       // extent changes with every character, so re-deriving the latch here is
       // how a reader gets overruled into "follow". Outside a stream keep the
