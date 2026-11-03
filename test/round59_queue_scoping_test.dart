@@ -155,7 +155,7 @@ void main() {
     await store.resumeSession('stored-b');
     gw.emit('message.start', {}, sid: 'stored-b-r1');
     await store.send('working in B');
-    gw.emit('message.complete', {'final_response': 'done B'}, sid: 'stored-b-r1');
+    gw.emit('message.complete', {'text': 'done B'}, sid: 'stored-b-r1');
     await pumpEventQueue();
 
     expect(gw.submittedFor('stored-b-r1'), isNot(contains('follow-up for A')),
@@ -175,7 +175,7 @@ void main() {
     await store.send('working in A');
     store.enqueuePrompt('follow-up for A');
 
-    gw.emit('message.complete', {'final_response': 'done A'}, sid: 'stored-a-r1');
+    gw.emit('message.complete', {'text': 'done A'}, sid: 'stored-a-r1');
     await pumpEventQueue();
 
     expect(gw.submittedFor('stored-a-r1'), contains('follow-up for A'),

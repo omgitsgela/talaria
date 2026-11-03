@@ -162,7 +162,7 @@ void main() {
         {'text': 'interim note', 'already_streamed': false});
     await tester.pump(const Duration(milliseconds: 60));
     gw.emit('message.complete', {
-      'final_response':
+      'text':
           List.generate(40, (j) => 'final line $j of the answer').join('\n'),
     });
     await tester.pump();

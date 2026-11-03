@@ -3,6 +3,25 @@
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
 
+## 1.4.2
+
+### build 59
+One scroll fix from Angela's follow-up report. 612 tests green (1 new).
+
+- **A full text reply no longer throws you to the top of the conversation.**
+  Reading just above the newest messages (scrolled up even slightly) and a
+  completed turn's full reply lands: the view flung through the whole
+  conversation, all the way to the oldest message. The reading-position
+  "hold" compensated using the list's total-height figure, which in a long
+  conversation is only an ESTIMATE — tall new rows entering the view make it
+  jump by tens of thousands of pixels that are not real growth (measured:
+  reader at 156 thrown to 34,479 when a 46-line reply landed). The hold now
+  measures the ACTUAL on-screen movement of the row you are looking at and
+  corrects by exactly that, once — so estimate churn from streaming, the
+  turn ending, or the history re-read can never move you. A parked reader
+  stays parked; genuine growth at the newest end still keeps your place
+  (the silent background re-read path keeps its measured compensation).
+
 ## 1.4.1
 
 ### build 58
