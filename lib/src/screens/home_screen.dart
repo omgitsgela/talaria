@@ -263,9 +263,15 @@ class _HomeScreenState extends State<HomeScreen> {
     // Only a genuine settle INSIDE the near-bottom band re-arms; an
     // out-of-range (negative) offset is plumbing, never intent. See
     // [_inNewestBand].
-    if (!_inNewestBand(pos.pixels)) return;
+    if (!_inNewestBand(pos.pixels)) {
+      // Parked: establish the on-screen anchor from this settled frame.
+      _scheduleReadPositionHold();
+      return;
+    }
     _setStick(true);
     _readHoldArmed = false;
+    _anchorKey = null;
+    _anchorY = null;
     _updateArrow();
   }
 
@@ -293,37 +299,32 @@ class _HomeScreenState extends State<HomeScreen> {
       _seenTranscriptEpoch = s.transcriptEpoch;
       _scheduleScrollToBottom();
     } else {
-      // A REPLACED transcript is not a grown one. The reader's offset no longer
-      // describes the same content, and compensating for the extent change is
-      // what flung a parked reader (offset 2500 of 9112) to 9978 of 12851 when a
-      // silent rehydrate landed mid-turn: exactly twice the extent change,
-      // because the compensation applied once per layout pass. Hold still and
-      // re-baseline instead; the hold resumes on the next real growth.
+      // Same conversation, reader away from the newest end (READING).
+      //
+      // BOTH kinds of change are handled by the SAME measured hold, because
+      // the extent figure cannot tell a grown transcript from a replaced one
+      // and, in a lazy variable-height list, cannot tell either from an
+      // ESTIMATE that merely churned. That is what this branch got wrong
+      // twice: the #38 double-application moved a parked reader by twice the
+      // extent change, and the round-60 "apply the replacement delta once"
+      // rewrite still trusted the estimate, so a shape-divergent history
+      // merge (which the interim-seal turn produces on EVERY turn) flung a
+      // reader parked 360px above the newest end to 114726.7px, the oldest
+      // message in the conversation, on one frame:
+      //
+      //   merged estimate 61392.3 -> 175759.0
+      //   delta  114366.7
+      //   target 360.0 + 114366.7 = 114726.7   (applied: landed at question 0)
+      //
+      // The guard could not refuse it: target - max == ref - refMax, so an
+      // in-range reference always yields an in-range target. Magnitude was
+      // unbounded; "once per epoch" limits how OFTEN it fired, not how far.
       if (_seenTranscriptEpoch != s.transcriptEpoch) {
         _seenTranscriptEpoch = s.transcriptEpoch;
-        if (_scroll.hasClients) {
-          _readHoldArmed = !_inNewestBand(_scroll.position.pixels);
-        }
+        // A replacement re-indexes the transcript, so a divider left at an
+        // old message index no longer means "where you left off".
         _lastReadIndex.remove(sid);
-        _updateArrow();
-        // A replacement must still follow REAL growth once: the silent
-        // stale-runtime rehydrate APPENDS messages (another client finished a
-        // turn), and the corrected #16 contract is to move the reader by that
-        // growth EXACTLY ONCE so their content stays on screen. The anchor
-        // drift cannot measure this pass - the replacement drops the anchor
-        // row out of the build set (measured: before=-296, after=null) - so
-        // use the extent delta, which is honest for a replacement because it
-        // is applied ONCE per epoch bump (the epoch check consumes the bump
-        // synchronously; the #16 double-application came from a stale
-        // reference letting EVERY layout pass see the same delta). Shrinks
-        // and out-of-range targets are still refused.
-        _scheduleReplacementHold();
-        return;
       }
-      // The user is READING (scrolled up). The reversed list drifts toward
-      // the newest end as that end grows (a streamed reply appended at
-      // offset 0 widens the extent without moving the offset), so pin their
-      // reading position by shifting the offset with the extent delta.
       _scheduleReadPositionHold();
     }
     _updateArrow();
@@ -333,85 +334,185 @@ class _HomeScreenState extends State<HomeScreen> {
   /// newest end of the REVERSED list.
   ///
   /// Geometry: offset is measured from the newest end (offset 0 = bottom).
-  /// When that end grows by Δ (text appended to the live reply, or a new
-  /// message), maxScrollExtent increases by Δ while the offset is unchanged —
-  /// so the content under the viewport slides toward the newest end and the
-  /// user's view "drifts". Adding Δ to the offset keeps exactly the same
-  /// content in the viewport (like the anchor you get in a forward list).
+  /// When that end grows, the content under the viewport slides toward the
+  /// newest end and the user's view "drifts". Adding the drift to the offset
+  /// keeps exactly the same content in the viewport.
   ///
   /// The measurement is deferred to post-frame: the store notifies BEFORE the
-  /// frame that renders the grown content is laid out, so the extent delta
-  /// only exists after layout. Only applied while the user is NOT following
-  /// the bottom (no drift there — offset 0 is the newest end itself) and NOT
-  /// actively dragging or settling a fling (adjusting mid-gesture would fight
-  /// the user's finger).
+  /// frame that renders the changed content is laid out, so the new position
+  /// of the anchor row only exists after layout. Only applied while the user
+  /// is NOT following the bottom (no drift there, because offset 0 is the newest end
+  /// itself) and NOT actively dragging or settling a fling (adjusting
+  /// mid-gesture would fight the user's finger).
   void _scheduleReadPositionHold() {
     if (!_readHoldArmed || !_scroll.hasClients) return;
-    // Capture the anchor while the PREVIOUS layout is still painted: the
-    // topmost built row (an older, stable row - the streaming reply is at the
-    // newest end and is never the topmost row while the reader is parked in
-    // history) and its current global y. No anchor, no compensation: staying
-    // still is always safer than moving on a measurement we cannot make.
-    final top = _lastTopBuilt;
-    if (top == null) return;
-    final key = ValueKey<String>('$_rowKey$top');
-    final before = _rowGlobalY(key);
-    if (before == null) return;
+    if (_holdScheduled) return;
+    _holdScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scroll.hasClients) return;
-      final np = _scroll.position;
-      if (np.userScrollDirection != ScrollDirection.idle) {
-        // Actively scrolling: the finger owns the position. Do not fight it.
-        return;
-      }
-      final after = _rowGlobalY(key);
-      if (after == null) return; // row un-built (scrolled out) - hold still
-      // Drift of the SAME row between the two layouts: new content at the
-      // newest end moves existing rows UP the screen, so `before - after > 0`
-      // means the view slid toward newer content and the offset must grow by
-      // exactly that drift to bring it back. This is real measured movement,
-      // not an extent ESTIMATE, so estimate churn (tall new rows entering the
-      // build set, turn-end re-measures, the deferred history merge) cannot
-      // fling the reader anywhere. The old extent-delta rule measured
-      // 3739 -> 20144 twice in one pass and parked readers at the OLDEST
-      // message when a full turn text reply landed ("it scrolls to the very
-      // top", 1.4.1 report: measured fling 156 -> 34479 of max 30143).
-      final drift = before - after;
-      if (drift.abs() < 0.5) return;
-      final target = np.pixels + drift;
-      // Out-of-range targets do not exist; refuse both sides (the #19 guard
-      // and the round-59 lower bound still apply to a real measurement).
-      if (target > np.maxScrollExtent + 0.5 || target < -0.5) return;
-      np.jumpTo(target);
+      _holdScheduled = false;
+      _compensateOnce();
     });
   }
 
-  /// One-shot compensation for a REPLACED transcript (the epoch branch).
+  bool _holdScheduled = false;
+
+  /// Frames still owed to a jump before the anchor can be measured again.
   ///
-  /// Unlike the streaming anchor hold, this measures with the extent delta:
-  /// a replacement that APPENDS genuinely grows the newest end and the
-  /// reader's row content is preserved above it, so following the growth is
-  /// correct. Exactly-once is enforced by the epoch itself: the branch that
-  /// calls this consumes the bump synchronously, so no second layout pass of
-  /// the same replacement can re-apply it (the #16 fling was re-applying a
-  /// stale extent reference on every pass). A shrink or an out-of-range
-  /// target is refused: stay still.
-  void _scheduleReplacementHold() {
-    if (!_scroll.hasClients) return;
+  /// `jumpTo` does not relayout synchronously, so the frame that performs the
+  /// jump still reports the PRE-jump position. Correcting again in that frame
+  /// re-applies the same drift (the #16 "moved twice" bug, and the +/-28px
+  /// oscillation a per-frame corrector produced against this fixture). One
+  /// settle pass re-baselines instead of moving.
+  int _settleFrames = 0;
+
+  /// The row the reader is parked on, and the global y it had last frame.
+  Key? _anchorKey;
+  double? _anchorY;
+
+  /// Correct the reader's on-screen position by the MEASURED movement of the
+  /// row they are looking at.
+  ///
+  /// One correction per layout change (a store event, or a
+  /// [ScrollMetricsNotification] for a content-size change), never a loop: the
+  /// scroll is a position, not something to chase frame by frame.
+  ///
+  /// Nothing here reads maxScrollExtent as growth. In a lazy variable-height
+  /// list that figure is an ESTIMATE, and trusting it is what flung a reader
+  /// parked at 360px to 114726.7px, "the very top of the conversation"
+  /// (1.4.2 report), and before that 156 to 34479 (1.4.1). The originals
+  /// are in the changelog; the rule is: real rows, real pixels.
+  void _compensateOnce() {
+    if (!mounted || !_scroll.hasClients) return;
+    if (!_readHoldArmed) {
+      _anchorKey = null;
+      _anchorY = null;
+      return;
+    }
     final pos = _scroll.position;
-    if (_inNewestBand(pos.pixels)) return; // following: nothing to hold
-    final ref = pos.pixels;
-    final refMax = pos.maxScrollExtent;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_scroll.hasClients) return;
-      final np = _scroll.position;
-      if (np.userScrollDirection != ScrollDirection.idle) return;
-      final delta = np.maxScrollExtent - refMax;
-      if (delta <= 0.5) return; // shrink or no real growth: stay put
-      final target = ref + delta;
-      if (target > np.maxScrollExtent + 0.5 || target < -0.5) return;
-      if ((target - np.pixels).abs() > 0.5) np.jumpTo(target);
-    });
+    if (pos.userScrollDirection != ScrollDirection.idle) {
+      // The finger owns the position. Drop the baseline so the next settled
+      // frame re-anchors rather than correcting against a stale reading.
+      _anchorKey = null;
+      _anchorY = null;
+      return;
+    }
+    if (_settleFrames > 0) {
+      _settleFrames--;
+      _snapshotAnchor();
+      return;
+    }
+    final tracked = _anchorKey;
+    final before = _anchorY;
+    if (tracked == null || before == null) {
+      _snapshotAnchor();
+      return;
+    }
+    final now = _rowGlobalY(tracked);
+    if (now == null) {
+      // The row we were tracking left the build set: re-anchor where the
+      // reader is now, and move them not at all.
+      _snapshotAnchor();
+      return;
+    }
+    final drift = before - now;
+    if (drift.abs() < 0.5) {
+      _anchorY = now;
+      return;
+    }
+    if (drift < 0) {
+      // Content moved DOWN the screen: something above the viewer shrank (a
+      // collapsed trace, a turn-end re-measure, a merge dropping a live
+      // segment). Following a shrink walks the reader toward the newest end a
+      // step at a time - the round-36 sequence that ended pinned at 0. A
+      // shrink is not growth; re-baseline and stay put.
+      _anchorY = now;
+      return;
+    }
+    final target = pos.pixels + drift;
+    // Out-of-range targets do not exist; refuse both sides (the #19 guard and
+    // the round-59 lower bound apply to a real measurement too).
+    if (target > pos.maxScrollExtent + 0.5 || target < -0.5) {
+      _anchorY = now;
+      return;
+    }
+    pos.jumpTo(target);
+    _settleFrames = 1;
+    _anchorY = before;
+  }
+
+  /// Record where the row the reader is looking at currently sits.
+  ///
+  /// Passive: this never moves anything. It is the "before" reading that the
+  /// next layout change is measured against.
+  void _snapshotAnchor() {
+    if (!mounted || !_scroll.hasClients) return;
+    if (!_readHoldArmed ||
+        _scroll.position.userScrollDirection != ScrollDirection.idle) {
+      _anchorKey = null;
+      _anchorY = null;
+      return;
+    }
+    final anchor = _visibleAnchor();
+    if (anchor == null) {
+      _anchorKey = null;
+      _anchorY = null;
+      return;
+    }
+    _anchorKey = anchor.key;
+    _anchorY = anchor.y;
+  }
+
+  /// The OLDEST transcript row that is visibly on screen, with its global y:
+  /// the row the reader is actually looking at.
+  ///
+  /// This is the hold's anchor, and the definition matters as much as the
+  /// measurement. Its predecessor was [_lastTopBuilt], a LIFETIME MINIMUM: it
+  /// only ever decreased and was never reset, so once the reader scrolled back
+  /// toward the newest end it named a row that was no longer built, `_rowGlobalY`
+  /// returned null, and every hold silently did nothing. It also tracked BUILT
+  /// rows, which include the cache region above the viewport, so its "topmost"
+  /// row could sit off screen where a rebuild moves it by an arbitrary amount,
+  /// the same class of phantom measurement as the extent estimate.
+  ///
+  /// A row that is on screen right now is stable across a append or a
+  /// suffix-divergent merge (its key is its chronological index and
+  /// `findChildIndexCallback` keeps its element), so the drift below is a
+  /// measurement of movement the reader can see.
+  ({Key key, double y})? _visibleAnchor() {
+    final screen = MediaQuery.maybeSizeOf(context)?.height ?? 0;
+    Rect? best;
+    Key? bestKey;
+    int? bestIndex;
+    void visit(Element e) {
+      final k = e.widget.key;
+      if (k is ValueKey<String> && k.value.startsWith(_rowKey)) {
+        final v = int.tryParse(k.value.substring(_rowKey.length));
+        final ro = e.renderObject;
+        if (v != null && ro is RenderBox && ro.attached && ro.hasSize) {
+          final o = ro.localToGlobal(Offset.zero);
+          final box = Rect.fromLTWH(o.dx, o.dy, ro.size.width, ro.size.height);
+          // A row whose TOP edge is on screen: the topmost visibly-clipped row.
+          // Deliberately NOT a row sitting in the cache band above the
+          // viewport - rows between such an anchor and the screen can change
+          // height (a history merge rewrites the tail), which leaves the
+          // anchor still while the reader's content slides.
+          final onScreen = box.top >= 0 && (screen <= 0 || box.top < screen);
+          if (onScreen && (bestIndex == null || v < bestIndex!)) {
+            bestIndex = v;
+            best = box;
+            bestKey = k;
+          }
+        }
+        return; // a row: do not descend into its children
+      }
+      e.visitChildElements(visit);
+    }
+
+    visit(context as Element);
+    final box = best;
+    final key = bestKey;
+    if (box == null || key == null) return null;
+    return (key: key, y: box.top);
   }
 
   /// Global y of the painted transcript row with [key], or null if it is not
@@ -537,6 +638,11 @@ class _HomeScreenState extends State<HomeScreen> {
         _setStick(atBottom);
         _readHoldArmed = !atBottom;
       }
+      // A size change is exactly when the content under a parked reader can
+      // move, and one store event produces SEVERAL of these passes (the new
+      // rows build, then the lazy list resolves its build set). Correct on
+      // every one of them, not just the frame the event arrived on.
+      if (_readHoldArmed) _compensateOnce();
       _updateArrow();
     });
   }
@@ -578,13 +684,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _topBuiltAssign(int i, int count) {
     final v = count - 1 - i;
     if (_topBuilt == null || v < _topBuilt!) _topBuilt = v;
-    // Never-nulled copy for the read-hold anchor: _topBuilt is cleared at the
-    // end of every frame, and the hold's capture happens at NOTIFICATION time
-    // (between frames), where it would otherwise always read null.
-    if (_lastTopBuilt == null || v < _lastTopBuilt!) _lastTopBuilt = v;
   }
-
-  int? _lastTopBuilt;
 
   /// The time-category break to show above the message at [i], or `null`.
   ///

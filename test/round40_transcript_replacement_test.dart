@@ -165,25 +165,25 @@ void main() {
 
     expect(store.messages.length, greaterThan(30),
         reason: 'the rehydrate must have landed, or this proves nothing');
-    // The CORRECTED contract. A rehydrate that APPENDS leaves the reader's
-    // content exactly where it was only if the offset follows the growth: the
-    // new messages are below them, so keeping what they are reading on screen
-    // means moving by that growth. The original bug was not the movement, it was
-    // the movement being applied twice (7478 for a 3739 change), which overshot
-    // the reader into the far end of the conversation. So the assertions are:
-    // the move matches the growth, and the reader is nowhere near the end.
+    // The contract, corrected again in round 61, and this time for a reason
+    // that does not depend on a number. A WHOLESALE replacement destroys row
+    // identity, so the view has no honest way to measure "how far the content
+    // the reader was looking at moved": the anchor row is not in the new build
+    // set (measured: before=58.0, now=null). The only other available figure is
+    // the maxScrollExtent DELTA, which in a lazy variable-height list is an
+    // ESTIMATE. Compensating with it is what flung readers to the top of the
+    // conversation in 1.4.1 (156 -> 34479) and again in 1.4.2 (360 -> 114726.7,
+    // anchor=question 0). So: an unmeasurable replacement moves the reader not
+    // at all. That is also what #38 asked for originally; round 60 bent it to
+    // satisfy this assertion, and the estimate got its revenge.
     final after = _pos(tester);
     final growth = after.maxScrollExtent - maxBefore;
-    // Never MORE than the growth: overshooting is the bug (the original
-    // measurement moved the reader twice the change, into the far end). Slightly
-    // less is correct and expected, because part of an extent change can be an
-    // ESTIMATE for rows above the reader, which must not move them at all.
     final moved = after.pixels - parked;
+    expect(moved.abs(), lessThan(200),
+        reason: 'a replacement the view cannot measure must leave the reader '
+            'where they were: moved=$moved growth=$growth');
     expect(moved, lessThanOrEqualTo(growth + 20),
-        reason: 'the reader must never be moved further than the content grew: '
-            'moved=$moved growth=$growth');
-    expect(moved, greaterThan(growth * 0.5),
-        reason: 'content must be preserved for the reader: '
+        reason: 'and never further than the content grew: '
             'moved=$moved growth=$growth');
     expect(after.pixels, lessThan(after.maxScrollExtent - 500),
         reason: 'and they must not be anywhere near the end of the '

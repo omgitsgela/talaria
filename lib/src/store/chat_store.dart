@@ -2168,10 +2168,21 @@ class ChatStore extends ChangeNotifier {
         _sameRefs(fresh[prefix].attachments, _messages[prefix].attachments)) {
       prefix++;
     }
+    final appendedOnly = prefix >= _messages.length;
     _messages.removeRange(prefix, _messages.length);
     _messages.addAll(fresh.skip(prefix));
+    if (appendedOnly) {
+      // A PURE APPEND preserves every existing row's identity: the new rows are
+      // all below the newest end, so the reader's rows are untouched and the
+      // view's anchor still names the same message. It is growth, not a
+      // replacement, so the epoch must NOT move: bumping it made the view
+      // treat the append as a replaced transcript and drop the measurement
+      // that keeps the reader's place.
+      return;
+    }
     // The list under the reader has changed shape, so any pixel measurement the
-    // view is holding no longer describes this transcript.
+    // view holds for a row past the preserved prefix no longer describes this
+    // transcript.
     _transcriptEpoch++;
   }
 

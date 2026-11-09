@@ -1,3 +1,34 @@
+## 1.4.3
+
+### build 60
+One scroll fix, from Angela's report on 1.4.2. 615 tests green (3 new).
+
+- **A response no longer throws you to the top of the conversation.** Reading
+  just above the newest messages, the second reply of a session landed and the
+  view jumped to the oldest message in the chat. Measured here at 360px up
+  thrown to 114726.7px, landing on `question 0`. The cause was the one
+  remaining place that trusted the transcript's total-height figure to decide
+  how far to move you: that figure is an ESTIMATE in a scrolling list, and it
+  can jump tens of thousands of pixels when tall new rows come into view. Its
+  safety check could never refuse the move, because the target and the limit
+  moved by the same amount. Magnitude was unbounded, and a turn that ends with
+  an interim message produces exactly the history rewrite that triggered it.
+  Your reading position is now held by measuring the row you are actually
+  looking at and following only its real on-screen movement, on every layout
+  pass rather than once per event. Nothing in the transcript moves you on the
+  total-height estimate any more.
+- **Your place in a long conversation survives a turn.** A reader parked
+  mid-conversation used to slide up one message with every reply, because the
+  hold had quietly stopped working: the row it tracked was a lifetime minimum
+  that never reset, so after scrolling it pointed at a row that was no longer
+  drawn and the correction did nothing. Measured across four turns: the same
+  line now stays put while only the offset follows the real growth below it.
+- **A message that arrives from another client no longer resets your reading
+  position.** When the durable history gained rows that the open transcript did
+  not have, the app treated the update as a wholesale rewrite and dropped the
+  correction. It is an append: the rows above you are untouched, so your place
+  is kept and the offset follows the added height exactly once.
+
 # Changelog
 
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
