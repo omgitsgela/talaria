@@ -94,10 +94,42 @@ class _ConnectionScreenState extends State<ConnectionScreen>  {
     _authRejected = widget.model.needsReauth;
     if (_authRejected) _authToken = false;
     _url.addListener(_onUrlChanged);
-    unawaited(_loadReauthState());
+    // Order matters: hydrate the vault credential first, then let a recorded
+    // reauth END the hydration (a dead token must never be presented as
+    // usable). Both are async; _loadReauthState's clear is the last writer.
+    unawaited(
+        _loadStoredToken().then((_) => _loadReauthState()));
     unawaited(_loadStagedFlowNotice());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_discoverFlows());
+    });
+  }
+
+  /// Hydrate the OAuth tab from the token VAULT, not just from the saved
+  /// connection record. The native sign-in persists tokens per gateway URL in
+  /// secure storage; a completed sign-in whose follow-up dial never happened
+  /// (the app was stopped mid-flow, or a saved record predates the token)
+  /// used to leave a perfectly good bearer in the vault while the form's
+  /// Bearer field stayed EMPTY — tapping Connect then dialed bare and the
+  /// gate 403'd the upgrade without a single auth-log line. The vault is the
+  /// credential's home; the field shows what is really there.
+  Future<void> _loadStoredToken() async {
+    final url = _url.text.trim();
+    if (url.isEmpty || url == _defaultUrl) return;
+    NativeTokenSet? set;
+    try {
+      set = await _oauthStore.load(GatewayConfig(url: url).baseUrl);
+    } catch (_) {
+      return;
+    }
+    if (!mounted || set == null || set.accessToken.isEmpty) return;
+    // Only hydrate when the field is empty (never clobber a token the user
+    // is typing/replacing) and we are (or are about to be) on the OAuth tab.
+    if (_bearer.text.trim().isNotEmpty) return;
+    final token = set.accessToken;
+    setState(() {
+      _bearer.text = token;
+      if (_authToken) _authToken = false;
     });
   }
 

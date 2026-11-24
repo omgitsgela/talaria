@@ -1,3 +1,24 @@
+## 1.4.5
+
+### build 62
+The finish of issue #39, from Angela's field trace: the sign-in completed and the phone reaped the app anyway. 620 tests green (3 new).
+
+- **A signed-in token now shows up where Connect can use it.** The browser
+  sign-in finished — the gateway logged the code exchanged and the token
+  saved — but the app was stopped before it could dial, and the connect
+  screen rebuilt its credential from the visible Bearer field, which was
+  empty. Tapping Connect then dialed with no credential at all and the
+  gateway refused the WebSocket upgrade with a bare 403. The saved token now
+  hydrates the Bearer field from the app's own encrypted store, and a token
+  the gateway has explicitly ended is never presented as usable.
+- **The keep-alive now covers the re-auth case.** 1.4.4 pinned the app
+  during sign-in only when no connection store existed on screen — but a
+  FAILED connect keeps its store around for the error banners, and a store
+  whose socket never connected never starts the keep-alive. So re-signing in
+  from the error screen was exactly the one state left unprotected, and the
+  app was reaped mid-browser again. The pin now fires whenever the store's
+  socket isn't live.
+
 ## 1.4.4
 
 ### build 61

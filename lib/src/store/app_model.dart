@@ -94,7 +94,15 @@ class AppModel extends ChangeNotifier {
     void Function(String status)? onStatus,
     bool forceInteractive = true,
   }) async {
-    final holdKeeper = _store == null;
+    // The store holds the keep-alive ONLY while its socket is actually
+    // live: it starts the service on connect success and stops it on close.
+    // A store left over from a FAILED connect (kept for error surfacing)
+    // holds nothing - and holding the keeper only when _store == null
+    // skipped the protection in exactly the reauth case that needs it
+    // (issue #39 follow-up: the app was reaped again mid-browser with
+    // error banners on screen).
+    final storeHoldsIt = _store != null && _phase == AppPhase.connected;
+    final holdKeeper = !storeHoldsIt;
     if (holdKeeper) {
       await _signInKeeper.start(
         title: 'Talaria is signing in',
