@@ -9,6 +9,7 @@ class SessionRow {
     this.title = '',
     this.preview = '',
     this.startedAt = 0,
+    this.lastActiveAt = 0,
     this.messageCount = 0,
     this.source = '',
   });
@@ -17,8 +18,16 @@ class SessionRow {
   final String title;
   final String preview;
   final double startedAt; // unix seconds
+  final double lastActiveAt; // unix seconds; 0 = gateway row lacked it
   final int messageCount;
   final String source;
+
+  /// What "most recent" means for this row: the gateway's last-activity
+  /// stamp when the source provided one, else creation time. REST
+  /// /api/sessions rows carry `last_active`; the WS `session.list` row does
+  /// not, so a fallback fetch leaves this 0 and we degrade to startedAt —
+  /// which is exactly the pre-1.4.6 behavior, never a wrong zero-bucket.
+  double get effectiveActivity => lastActiveAt > 0 ? lastActiveAt : startedAt;
 
   factory SessionRow.fromJson(Map<String, dynamic> j) => SessionRow(
         id: (j['id'] ?? j['resolved_id'] ?? '') as String,
@@ -26,6 +35,8 @@ class SessionRow {
         preview: (j['preview'] ?? '') as String,
         startedAt:
             j['started_at'] is num ? (j['started_at'] as num).toDouble() : 0,
+        lastActiveAt:
+            j['last_active'] is num ? (j['last_active'] as num).toDouble() : 0,
         messageCount: j['message_count'] is int ? j['message_count'] as int : 0,
         source: (j['source'] ?? '') as String,
       );
@@ -35,6 +46,7 @@ class SessionRow {
         title: title,
         preview: preview,
         startedAt: startedAt,
+        lastActiveAt: lastActiveAt,
         messageCount: messageCount,
         source: source,
       );

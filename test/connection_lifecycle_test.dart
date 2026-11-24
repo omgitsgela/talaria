@@ -21,6 +21,14 @@ void main() {
   test('saved startup completes its phase', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     server.listen((r) async {
+      // A real gateway serves REST and WS on the same port; the roster pull
+      // now tries GET /api/sessions first, so the fake must answer plain
+      // HTTP (404 = no REST listing here) and only upgrade real WS handshakes.
+      if (r.headers.value('upgrade')?.toLowerCase() != 'websocket') {
+        r.response.statusCode = 404;
+        await r.response.close();
+        return;
+      }
       final ws = await WebSocketTransformer.upgrade(r);
       ws.listen((raw) {
         final f = jsonDecode(raw as String);

@@ -106,11 +106,13 @@ void main() {
     expect(segs.first.label, '', reason: 'the pinned group has an empty label');
     expect(segs.first.rows.map((r) => r.id), ['month']);
 
-    // The remaining segments are the time buckets in newest-first order, each
-    // preserving the gateway's (input) most-recent-first order.
+    // The remaining segments are the time buckets in newest-first order,
+    // each sorted most-recent-activity-first by the store (not input order:
+    // the roster sort keeps both fetch paths identical whatever order rows
+    // arrive in).
     expect(segs[1].label, 'Today');
-    expect(segs[1].rows.map((r) => r.id), ['today1', 'today2'],
-        reason: 'two same-day rows, most-recent first as supplied');
+    expect(segs[1].rows.map((r) => r.id), ['today2', 'today1'],
+        reason: 'two same-day rows, 10:00 answer beats the 09:00 answer');
     expect(segs[2].label, 'Yesterday');
     expect(segs[2].rows.map((r) => r.id), ['yest']);
     expect(segs[3].label, 'This week');

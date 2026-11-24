@@ -1,3 +1,25 @@
+## 1.4.6
+
+### build 63
+Conversations sort by the latest reply, like the Hermes Desktop sidebar. 627 tests green (7 new).
+
+- **The roster now buckets by LAST ACTIVITY, not creation date.** A
+  conversation started in September and answered this morning now sits under
+  Today at the top of the list, instead of sunk to Older. Talaria used to
+  pull the roster over the WebSocket `session.list`, whose row drops the
+  gateway's `last_active` stamp - so the only timestamp available was the
+  creation time. The roster now comes from the same REST endpoint Hermes
+  Desktop's sidebar uses (`/api/sessions?order=recent`, which sorts across a
+  conversation's whole compression chain and carries the stamp), paged to
+  cover the full 600-row fetch. If a gateway can't serve that endpoint, the
+  old WebSocket pull remains as a fallback and behaves exactly as before.
+- **Within every bucket, the freshest reply leads** - on both fetch paths,
+  whatever order the rows arrive in.
+- **A new reply now re-sorts the list live.** The roster change-detector
+  previously ignored the activity stamp, so a reply landing on an old
+  conversation wouldn't move it until some unrelated field happened to
+  change.
+
 ## 1.4.5
 
 ### build 62

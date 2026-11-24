@@ -3142,7 +3142,8 @@ class _SessionsSheetState extends State<SessionsSheet> {
           if (badge != null) _SourceBadge(label: badge),
         ],
       ),
-      subtitle: Text(s.preview.isEmpty ? _ts(s.startedAt) : s.preview,
+      subtitle: Text(
+          s.preview.isEmpty ? _ts(s.effectiveActivity) : s.preview,
           overflow: TextOverflow.ellipsis, style: theme.textTheme.bodySmall),
       trailing: PopupMenuButton<String>(
         itemBuilder: (context) => [

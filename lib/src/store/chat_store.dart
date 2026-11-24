@@ -37,10 +37,13 @@ class ChatStore extends ChangeNotifier {
   ChatStore(
       {required GatewayConfig config,
       GatewayClient? client,
-      OAuthFlowRunner? oauthRunner})
+      OAuthFlowRunner? oauthRunner,
+      GatewayHttp? http})
       : config = config,
         _client = client ?? GatewayClient(config),
-        _http = GatewayHttp(config),
+        // The [http] seam lets tests drive the REST roster path with a
+        // MockClient while keeping the real WS client.
+        _http = http ?? GatewayHttp(config),
         _oauth = oauthRunner {
     _wireEvents();
     _client.stateChanges.listen(_onState);
@@ -611,8 +614,12 @@ class ChatStore extends ChangeNotifier {
   }
 
   // ── Roster segmentation (pinned + time buckets) ───────────────────
-  /// Time-bucket label for a conversation's [unixSeconds], or null when it
-  /// has no timestamp (those rows fall into 'Older').
+  /// Time-bucket label for a conversation's [unixSeconds] LAST-ACTIVITY
+  /// stamp, or null when it has no timestamp (those rows fall into 'Older').
+  /// Callers pass [SessionRow.effectiveActivity], not the creation time: a
+  /// conversation answered today belongs in Today no matter when it started
+  /// (Hermes Desktop's sidebar has bucketed this way all along; the WS
+  /// session.list row just never carried the stamp to make it possible).
   static String? _rosterTimeBucket(double unixSeconds) {
     if (unixSeconds <= 0) return null;
     final d = DateTime.fromMillisecondsSinceEpoch((unixSeconds * 1000).round());
@@ -665,12 +672,16 @@ class ChatStore extends ChangeNotifier {
       // A human conversation, which the automation view does not show: the two
       // are separate views rather than one appended list.
       if (_showBackgroundSessions) continue;
-      final bucket = _rosterTimeBucket(s.startedAt) ?? 'Older';
+      final bucket = _rosterTimeBucket(s.effectiveActivity) ?? 'Older';
       byBucket[bucket]!.add(s);
     }
     final out = <RosterSegment>[];
     // Pinned leads BOTH views: a pin is an explicit act and outranks the view.
-    if (pinnedRows.isNotEmpty) out.add(RosterSegment('', pinnedRows));
+    if (pinnedRows.isNotEmpty) {
+      pinnedRows.sort((a, b) =>
+          b.effectiveActivity.compareTo(a.effectiveActivity));
+      out.add(RosterSegment('', pinnedRows));
+    }
     if (_showBackgroundSessions) {
       final labels = byCategory.keys.toList()
         ..sort((a, b) {
@@ -678,11 +689,20 @@ class ChatStore extends ChangeNotifier {
           return rank != 0 ? rank : a.compareTo(b);
         });
       for (final label in labels) {
-        out.add(RosterSegment(label, byCategory[label]!));
+        final rows = byCategory[label]!
+          ..sort((a, b) =>
+              b.effectiveActivity.compareTo(a.effectiveActivity));
+        out.add(RosterSegment(label, rows));
       }
     } else {
       for (final label in byBucket.keys) {
-        final rows = byBucket[label]!;
+        final rows = byBucket[label]!
+          // Most recent REPLY first inside a bucket. The REST roster
+          // already arrives in this order (order=recent), but the WS
+          // fallback and pinned back-fill can arrive in other orders, and
+          // an explicit sort keeps the two paths identical.
+          ..sort((a, b) =>
+              b.effectiveActivity.compareTo(a.effectiveActivity));
         if (rows.isNotEmpty) out.add(RosterSegment(label, rows));
       }
     }
@@ -2328,13 +2348,27 @@ class ChatStore extends ChangeNotifier {
   Future<void> loadSessions() async {
     if (_client.state != GwConnectionState.open) return;
     try {
-      final res =
-          await _client.request('session.list', {'limit': rosterFetchLimit});
-      final list = res['sessions'];
-      final rows = (list is List ? list : const <Map<String, dynamic>>[])
-          .whereType<Map<String, dynamic>>()
-          .map(SessionRow.fromJson)
-          .toList();
+      // REST first: /api/sessions?order=recent carries `last_active`, the
+      // per-session activity stamp Hermes Desktop's sidebar sorts on. The
+      // WS `session.list` row drops that field, which is why Talaria's
+      // roster bucketed by CREATION date and an old conversation with a
+      // fresh reply sank to "Older". On any REST miss (unsupported auth
+      // mode, gateway predating the endpoint, transport error) fall back
+      // to the WS roster: same rows minus the stamp, which degrades
+      // exactly to the pre-1.4.6 behavior.
+      final rest = await _http.roster(limit: rosterFetchLimit);
+      List<SessionRow> rows;
+      if (rest != null) {
+        rows = rest.map(SessionRow.fromJson).toList();
+      } else {
+        final res =
+            await _client.request('session.list', {'limit': rosterFetchLimit});
+        final list = res['sessions'];
+        rows = (list is List ? list : const <Map<String, dynamic>>[])
+            .whereType<Map<String, dynamic>>()
+            .map(SessionRow.fromJson)
+            .toList();
+      }
       // The gateway broadcasts `sessions.changed` on every DB write (and on
       // the 500ms mtime poll that can fire without a change), so this pull
       // runs often. Re-assigning an identical roster on every pull notified
@@ -2351,7 +2385,7 @@ class ChatStore extends ChangeNotifier {
     }
   }
 
-  /// Same rows in the same order: id + title + preview + timestamp.
+  /// Same rows in the same order: id + title + preview + timestamps.
   static bool _rosterEqual(List<SessionRow> a, List<SessionRow> b) {
     if (a.length != b.length) return false;
     for (var i = 0; i < a.length; i++) {
@@ -2361,6 +2395,7 @@ class ChatStore extends ChangeNotifier {
           x.title != y.title ||
           x.preview != y.preview ||
           x.startedAt != y.startedAt ||
+          x.lastActiveAt != y.lastActiveAt ||
           x.messageCount != y.messageCount) {
         return false;
       }

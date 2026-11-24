@@ -116,6 +116,60 @@ class GatewayHttp {
     }
   }
 
+  /// GET /api/sessions?order=recent — the SAME roster source Hermes Desktop's
+  /// chat sidebar uses (verified in web/src/components/ChatSessionList.tsx).
+  /// Unlike the WS `session.list` row, REST rows carry `last_active` (the
+  /// freshest stamp across the compression chain), which is what lets the
+  /// roster bucket by most-recent-reply instead of creation date. Gated
+  /// gateways accept the native-OAuth bearer here (dashboard_auth middleware
+  /// bearer path). Returns null when REST listing is unavailable for any
+  /// reason (auth mode this gateway rejects, older gateway, transport error)
+  /// — the caller falls back to the WS roster unchanged.
+  Future<List<Map<String, dynamic>>?> roster(
+      {int limit = 100, String? excludeSources}) async {
+    // The endpoint caps limit at 100 (le=100), so a generous roster like
+    // Talaria's 600-row pull pages through it. ``total`` in the envelope
+    // bounds the loop; a short page ends it early.
+    const pageSize = 100;
+    final out = <Map<String, dynamic>>[];
+    final seen = <String>{};
+    var offset = 0;
+    try {
+      int? total;
+      while (out.length < limit && (total == null || offset < total)) {
+        final qp = <String, String>{
+          'limit': '${(pageSize).clamp(1, 100)}',
+          'offset': '$offset',
+          'order': 'recent',
+        };
+        if (excludeSources != null && excludeSources.isNotEmpty) {
+          qp['exclude_sources'] = excludeSources;
+        }
+        final uri = Uri.parse(config.httpUrl('/api/sessions'))
+            .replace(queryParameters: qp);
+        final res = await _client
+            .get(uri, headers: {..._headers(), 'Accept': 'application/json'})
+            .timeout(const Duration(seconds: 12));
+        if (res.statusCode != 200) return offset == 0 ? null : out;
+        final body = _tryJson(res.body);
+        if (body == null) return offset == 0 ? null : out;
+        final list = body['sessions'];
+        if (list is! List) return offset == 0 ? null : out;
+        final page = list.whereType<Map<String, dynamic>>().toList();
+        for (final row in page) {
+          final id = row['id'];
+          if (id is String && seen.add(id)) out.add(row);
+        }
+        if (body['total'] is int) total = body['total'] as int;
+        if (page.length < pageSize) break;
+        offset += page.length;
+      }
+      return out;
+    } catch (_) {
+      return offset == 0 ? null : out;
+    }
+  }
+
   /// Mint a single-use WS ticket on a gated gateway. Requires a valid
   /// bearer token (native OAuth) or session cookie.
   Future<String?> mintWsTicket() async {
