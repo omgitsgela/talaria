@@ -113,6 +113,46 @@ class OAuthTokenStore {
     } catch (_) {}
   }
 
+  // ── Post-mortem for a sign-in the OS killed mid-browser ──────────────
+  // OEM battery policies can reap the app's process while the browser step
+  // is open even though the recents card looks alive. The in-memory flow
+  // dies with the isolate, and the relaunched app silently falls back to
+  // auto-dialing the saved gateway with the old credential - the reported
+  // "browser says sign-in received but the app never applies it" (issue
+  // #39). A marker staged before the browser opens and consumed at flow
+  // END survives a kill (the finally never runs), so the relaunched
+  // sign-in screen can explain the silence instead of failing invisibly.
+  static const _stagedPrefix = 'talaria.stagedflow.';
+
+  String _stagedKeyFor(String baseUrl) => '$_stagedPrefix${_keyFor(baseUrl)}';
+
+  Future<void> markFlowStaged(String baseUrl) async {
+    try {
+      await _storage.write(key: _stagedKeyFor(baseUrl), value: 'in-flight');
+    } catch (_) {
+      // Best effort: a failed write only costs the post-mortem notice.
+    }
+  }
+
+  Future<void> clearFlowStaged(String baseUrl) async {
+    try {
+      await _storage.delete(key: _stagedKeyFor(baseUrl));
+    } catch (_) {}
+  }
+
+  /// True (once) when a staged flow marker survived a relaunch: the previous
+  /// sign-in died mid-browser. Consumes the marker.
+  Future<bool> takeStagedFlowNotice(String baseUrl) async {
+    try {
+      final raw = await _storage.read(key: _stagedKeyFor(baseUrl));
+      if (raw == null || raw.isEmpty) return false;
+      await _storage.delete(key: _stagedKeyFor(baseUrl));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// The single destructive token-record delete. Every guarded cleanup and
   /// every explicit teardown routes through here (via _guardedDelete), so a
   /// test seam can slow down deletion itself — modelling asynchronous storage
@@ -312,6 +352,10 @@ class OAuthFlowRunner {
     _pendingCallback = callback;
     final cancel = Completer<void>();
     _activeCancel = cancel;
+    // Stage the survived-a-kill marker BEFORE the browser opens. Cleared in
+    // the finally below; if the process is reaped mid-flow the finally never
+    // runs and the relaunched app reports what was lost (issue #39).
+    await store.markFlowStaged(config.baseUrl);
     late StreamSubscription sub;
     sub = server.listen((req) async {
       final path = req.uri.path;
@@ -378,6 +422,10 @@ class OAuthFlowRunner {
       if (_pendingCallback == callback) _pendingCallback = null;
       if (_activeServer == server) _activeServer = null;
       if (_activeCancel == cancel) _activeCancel = null;
+      // The flow ended in THIS process (success, error, or cancel): the
+      // post-mortem marker has served its purpose. A reaped process never
+      // reaches here, so its marker survives for the relaunched app to find.
+      await store.clearFlowStaged(config.baseUrl);
     }
   }
 

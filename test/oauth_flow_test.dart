@@ -63,6 +63,23 @@ void main() {
       expect(loaded2!.accessToken, 'at-2');
       expect(await store.load('https://gw.example.internal:9119'), isNull);
     });
+    test('staged-flow marker survives a simulated kill and is consumed once',
+        () async {
+      // Models the issue-#39 sequence: signIn stages the marker; the process
+      // dies before the finally runs (simulated by clearing the in-memory
+      // runner and leaving the storage fake intact); the relaunched app must
+      // find the notice, and the SECOND read must be empty (stated once).
+      final store = OAuthTokenStore();
+      final base = 'https://gw.example.internal:9119';
+      await store.markFlowStaged(base);
+      expect(await store.takeStagedFlowNotice(base), isTrue);
+      expect(await store.takeStagedFlowNotice(base), isFalse);
+      // A clean flow clears the marker: clearFlowStaged leaves nothing to
+      // report (this is the path the real finally takes).
+      await store.markFlowStaged(base);
+      await store.clearFlowStaged(base);
+      expect(await store.takeStagedFlowNotice(base), isFalse);
+    });
   });
 
   group('OAuthFlowRunner (loopback integration)', () {
@@ -116,6 +133,12 @@ void main() {
       final headers = {'X-Proxy-Id': 'test-proxy', 'X-Proxy-Secret': 'secret123'};
       final config = GatewayConfig(url: 'http://127.0.0.1:${gw.port}', headers: headers);
       final browserClient = http.Client();
+      final fake = FlutterSecureStoragePlatform.instance
+          as TestFlutterSecureStoragePlatform;
+      // Captured inside the fake browser, at the moment the loopback
+      // callback has landed but the flow is still open: this is the window
+      // where an OS kill would strand the code. The marker must be staged.
+      var markerSeenDuringFlow = false;
       final runner = OAuthFlowRunner(
           store: OAuthTokenStore(), httpClient: browserClient);
 
@@ -129,6 +152,8 @@ void main() {
           await browserClient
               .get(url)
               .timeout(const Duration(seconds: 10));
+          markerSeenDuringFlow = fake.data.keys
+              .any((k) => k.startsWith('talaria.stagedflow.'));
         },
       );
 
@@ -137,6 +162,15 @@ void main() {
       expect(tokens.userId, 'u42');
       expect(authorizeHits, 1);
       expect(tokenHits, 1);
+
+      // Issue #39: the survived-a-kill marker must be PRESENT while the
+      // browser step is open (that's what makes a reaped flow reportable)
+      // and GONE once the flow ends in this process.
+      expect(markerSeenDuringFlow, isTrue);
+      final survived = fake.data.keys
+          .where((k) => k.startsWith('talaria.stagedflow.'))
+          .toList();
+      expect(survived, isEmpty);
 
       // The token set was persisted to secure storage under the gateway url.
       final stored = await runner.store.load(config.baseUrl);

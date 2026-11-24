@@ -95,8 +95,28 @@ class _ConnectionScreenState extends State<ConnectionScreen>  {
     if (_authRejected) _authToken = false;
     _url.addListener(_onUrlChanged);
     unawaited(_loadReauthState());
+    unawaited(_loadStagedFlowNotice());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_discoverFlows());
+    });
+  }
+
+  /// Issue #39 post-mortem: a staged browser sign-in whose marker SURVIVED
+  /// into this launch means the OS killed Talaria mid-flow (the finally that
+  /// clears the marker never ran). Explain the silence instead of letting the
+  /// relaunched app fail invisibly. Consumes the marker: stated exactly once.
+  Future<void> _loadStagedFlowNotice() async {
+    final c = widget.model.saved;
+    if (c == null) return;
+    final lost = await _oauthStore.takeStagedFlowNotice(c.baseUrl);
+    if (!mounted || !lost) return;
+    setState(() {
+      if (_oauthError.isEmpty) {
+        _oauthError =
+            'Your last sign-in was interrupted when the phone stopped '
+            'Talaria during the browser step (the sign-in code expired with '
+            'it). Tap Sign in with Hermes to try again.';
+      }
     });
   }
 

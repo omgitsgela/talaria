@@ -18,6 +18,38 @@ void main() {
     try { expect((await http.testConnection()).ok, false); }
     finally { http.close(); await server.close(force: true); }
   });
+  test('probe names an ended session instead of claiming unreachable (#39)',
+      () async {
+    // The gateway answers the ticket mint with a 401 session_expired body:
+    // the connection REACHED the gateway, so "Unreachable: WebSocket
+    // authentication..." was a lie that sent users debugging their network.
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((r) async {
+      if (r.uri.path == '/api/health') {
+        r.response.write('{"ok":true,"auth_required":true}');
+      } else if (r.uri.path == '/api/auth/ws-ticket') {
+        r.response.statusCode = 401;
+        r.response.headers.contentType = ContentType.json;
+        r.response
+            .write('{"error":"session_expired","detail":"Unauthorized"}');
+      } else {
+        r.response.statusCode = 403;
+      }
+      await r.response.close();
+    });
+    final http = GatewayHttp(GatewayConfig(
+        url: 'http://127.0.0.1:${server.port}', oauthToken: 'dead'));
+    try {
+      final p = await http.testConnection();
+      expect(p.ok, false);
+      expect(p.authRequired, true);
+      expect(p.detail, contains('ended this sign-in'));
+      expect(p.detail, isNot(contains('Unreachable')));
+    } finally {
+      http.close();
+      await server.close(force: true);
+    }
+  });
   test('failed OAuth ticket never falls back to unauthenticated WS', () async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     var upgrades = 0;

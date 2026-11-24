@@ -5,6 +5,7 @@ import '../gateway/client.dart';
 import '../gateway/config.dart';
 import '../gateway/http_service.dart';
 import '../gateway/oauth_flow.dart';
+import '../notifications/foreground.dart';
 import 'chat_store.dart';
 
 enum AppPhase { noConnection, connecting, connected }
@@ -47,6 +48,12 @@ class AppModel extends ChangeNotifier {
   final OAuthFlowRunner _oauthRunner;
   final Future<void> Function(Uri url) _openBrowser;
 
+  /// Keeps the isolate alive across the browser step of an interactive
+  /// sign-in (issue #39). Separate from the store's keeper: the store owns
+  /// the service while a connection is live; this one only holds it while
+  /// there is no store to hold it.
+  final ForegroundKeeper _signInKeeper = ForegroundKeeper();
+
   GatewayConfig? _saved;
   GatewayConfig? get saved => _saved;
   ChatStore? _store;
@@ -72,22 +79,45 @@ class AppModel extends ChangeNotifier {
   /// the reported "the OAuth screen doesn't let you go to the sign in page".
   /// Automatic recovery paths do NOT use this method: the store refreshes
   /// stored tokens itself via the runner before dialing.
+  ///
+  /// Issue #39: while the browser step is open the app is backgrounded with
+  /// NO keep-alive, and aggressive OEM battery policies reap the process —
+  /// the loopback code arrives for a dead isolate and the relaunched app
+  /// silently auto-dials the old credential. The foreground service is the
+  /// only thing that protects the Dart isolate while backgrounded, so an
+  /// interactive sign-in with no live store now holds it for the duration of
+  /// the flow. (When a store IS live it already holds the service; starting
+  /// is idempotent but STOPPING from here would yank it out from under the
+  /// store, so a live-store sign-in leaves the lifetime to the store.)
   Future<GatewayConfig> signInOAuth(
     GatewayConfig c, {
     void Function(String status)? onStatus,
     bool forceInteractive = true,
-  }) =>
-      _oauthRunner
-          .resolveToken(
-            c,
-            openBrowser: _openBrowser,
-            onStatus: (s) {
-              onStatus?.call(s);
-              return s;
-            },
-            forceInteractive: forceInteractive,
-          )
-          .then((set) => c.copyWith(oauthToken: set.accessToken));
+  }) async {
+    final holdKeeper = _store == null;
+    if (holdKeeper) {
+      await _signInKeeper.start(
+        title: 'Talaria is signing in',
+        text: 'Finish the sign-in in your browser — stay on this screen.',
+      );
+    }
+    try {
+      final set = await _oauthRunner.resolveToken(
+        c,
+        openBrowser: _openBrowser,
+        onStatus: (s) {
+          onStatus?.call(s);
+          return s;
+        },
+        forceInteractive: forceInteractive,
+      );
+      return c.copyWith(oauthToken: set.accessToken);
+    } finally {
+      if (holdKeeper) {
+        await _signInKeeper.stop();
+      }
+    }
+  }
 
   /// Abandon an in-flight browser sign-in (the user closed the browser tab,
   /// or the flow is stuck): frees the sign-in buttons immediately instead of

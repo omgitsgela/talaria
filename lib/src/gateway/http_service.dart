@@ -166,6 +166,18 @@ class GatewayHttp {
       await ws.connect();
       await ws.request('gateway.ping', const {}, 5000);
       return h;
+    } on GatewayAuthError catch (e) {
+      // Issue #39: collapsing an explicit auth rejection into "Unreachable:
+      // WebSocket authentication or RPC validation failed" read as a network
+      // fault and sent users debugging their VPN when the gateway answered
+      // fine and simply refused a dead credential. The connection reached
+      // the gateway - say so, and say what the gateway said.
+      return ProbeResult(
+          ok: false,
+          authRequired: true,
+          detail: e.sessionExpired
+              ? 'Reached the gateway; it ended this sign-in. Sign in again.'
+              : 'Reached the gateway; it rejected this credential. Sign in again.');
     } catch (_) {
       return const ProbeResult(ok: false, detail: 'WebSocket authentication or RPC validation failed');
     } finally {

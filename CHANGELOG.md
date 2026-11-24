@@ -1,3 +1,25 @@
+## 1.4.4
+
+### build 61
+Browser sign-in no longer dies silently when the phone reaps the app mid-flow (issue #39). 617 tests green (2 new).
+
+- **A browser sign-in now holds the keep-alive.** While you finish signing
+  in in the browser, Talaria is backgrounded with no connection to protect
+  it, and aggressive phone battery policies can kill its process right
+  there — the browser still shows "sign-in received" because the callback
+  page is drawn by the browser, but the code arrives for a dead app, and
+  the relaunched app silently falls back to dialing with your old
+  credential. "Talaria is signing in" now pins the app for the duration of
+  the sign-in so the flow survives the browser step.
+- **An interrupted sign-in now says so.** If a sign-in is killed mid-browser
+  anyway (the OS always wins against the OS), the next time you open the
+  sign-in screen it says what happened instead of failing invisibly.
+- **The connection test stopped lying.** A gateway that answers and refuses
+  a dead credential no longer reports "Unreachable: WebSocket
+  authentication or RPC validation failed" (which reads as a network
+  fault). It now says: "Reached the gateway; it ended this sign-in. Sign
+  in again."
+
 ## 1.4.3
 
 ### build 60
@@ -33,6 +55,7 @@ One scroll fix, from Angela's report on 1.4.2. 615 tests green (3 new).
 
 All notable user-visible changes to Talaria. Versioning is `major.minor` for feature
 rounds plus a monotonic `+build` code that is mirrored in `lib/src/app_version.dart`.
+
 
 ## 1.4.2
 
